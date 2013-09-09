@@ -21,7 +21,7 @@
  *   You should have received a copy of the GNU General Public License     *
  *   along with this program; if not, write to the                         *
  *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -711,6 +711,7 @@ static int stm32x_write(struct flash_bank *bank, uint8_t *buffer,
 static void setup_sector(struct flash_bank *bank, int start, int num, int size)
 {
 	for (int i = start; i < (start + num) ; i++) {
+		assert(i < bank->num_sectors);
 		bank->sectors[i].offset = bank->size;
 		bank->sectors[i].size = size;
 		bank->size += bank->sectors[i].size;
@@ -830,7 +831,7 @@ static int stm32x_probe(struct flash_bank *bank)
 	setup_sector(bank, 4, 1, 64 * 1024);
 
 	/* dynamic memory */
-	setup_sector(bank, 4 + 1, MAX(12, num_pages) - 5, 128 * 1024);
+	setup_sector(bank, 4 + 1, MIN(12, num_pages) - 5, 128 * 1024);
 
 	if (stm32x_info->has_large_mem) {
 

@@ -21,7 +21,7 @@
  *   You should have received a copy of the GNU General Public License     *
  *   along with this program; if not, write to the                         *
  *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  ***************************************************************************/
 
 #ifndef REPLACEMENTS_H
@@ -278,5 +278,9 @@ typedef struct {
 #define PT_LOAD			1		/* Loadable program segment */
 
 #endif	/* HAVE_ELF_H */
+
+#if defined HAVE_LIBUSB1 && !defined HAVE_LIBUSB_ERROR_NAME
+const char *libusb_error_name(int error_code);
+#endif /* defined HAVE_LIBUSB1 && !defined HAVE_LIBUSB_ERROR_NAME */
 
 #endif	/* REPLACEMENTS_H */

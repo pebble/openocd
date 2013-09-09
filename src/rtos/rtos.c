@@ -15,7 +15,7 @@
  *   You should have received a copy of the GNU General Public License     *
  *   along with this program; if not, write to the                         *
  *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -35,6 +35,7 @@ extern struct rtos_type ThreadX_rtos;
 extern struct rtos_type eCos_rtos;
 extern struct rtos_type Linux_os;
 extern struct rtos_type ChibiOS_rtos;
+extern struct rtos_type embKernel_rtos;
 
 static struct rtos_type *rtos_types[] = {
 	&ThreadX_rtos,
@@ -43,6 +44,7 @@ static struct rtos_type *rtos_types[] = {
 	&eCos_rtos,
 	&Linux_os,
 	&ChibiOS_rtos,
+	&embKernel_rtos,
 	NULL
 };
 

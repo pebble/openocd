@@ -33,7 +33,7 @@
  *   You should have received a copy of the GNU General Public License     *
  *   along with this program; if not, write to the                         *
  *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  *                                                                         *
  *   Cortex-A8(tm) TRM, ARM DDI 0344H                                      *
  *   Cortex-A9(tm) TRM, ARM DDI 0407F                                      *
@@ -1949,7 +1949,7 @@ static int cortex_a8_read_apb_ab_memory(struct target *target,
 	int start_byte = address & 0x3;
 	struct reg *reg;
 	uint32_t dscr;
-	char *tmp_buff = NULL;
+	uint32_t *tmp_buff;
 	uint32_t buff32[2];
 	if (target->state != TARGET_HALTED) {
 		LOG_WARNING("target not halted");
@@ -1957,6 +1957,14 @@ static int cortex_a8_read_apb_ab_memory(struct target *target,
 	}
 
 	total_u32 = DIV_ROUND_UP((address & 3) + total_bytes, 4);
+
+	/* Due to offset word alignment, the  buffer may not have space
+	 * to read the full first and last int32 words,
+	 * hence, malloc space to read into, then copy and align into the buffer.
+	 */
+	tmp_buff = malloc(total_u32 * 4);
+	if (tmp_buff == NULL)
+		return ERROR_FAIL;
 
 	/* Mark register R0 as dirty, as it will be used
 	 * for transferring the data.
@@ -1970,7 +1978,7 @@ static int cortex_a8_read_apb_ab_memory(struct target *target,
 	retval =
 		mem_ap_sel_write_atomic_u32(swjdp, armv7a->debug_ap, armv7a->debug_base + CPUDBG_DRCR, 1<<2);
 	if (retval != ERROR_OK)
-		return retval;
+		goto error_free_buff_r;
 
 	/* Read DSCR */
 	retval = mem_ap_sel_read_atomic_u32(swjdp, armv7a->debug_ap,
@@ -2009,12 +2017,6 @@ static int cortex_a8_read_apb_ab_memory(struct target *target,
 		goto error_unset_dtr_r;
 
 
-	/* Due to offset word alignment, the  buffer may not have space
-	 * to read the full first and last int32 words,
-	 * hence, malloc space to read into, then copy and align into the buffer.
-	 */
-	tmp_buff = (char *) malloc(total_u32<<2);
-
 	/* The last word needs to be handled separately - read all other words in one go.
 	 */
 	if (total_u32 > 1) {
@@ -2023,7 +2025,7 @@ static int cortex_a8_read_apb_ab_memory(struct target *target,
 		 *
 		 * This data is read in aligned to 32 bit boundary, hence may need shifting later.
 		 */
-		retval = mem_ap_sel_read_buf_u32_noincr(swjdp, armv7a->debug_ap, (uint8_t *)tmp_buff, (total_u32-1)<<2,
+		retval = mem_ap_sel_read_buf_u32_noincr(swjdp, armv7a->debug_ap, (uint8_t *)tmp_buff, (total_u32-1) * 4,
 									armv7a->debug_base + CPUDBG_DTRTX);
 		if (retval != ERROR_OK)
 			goto error_unset_dtr_r;
@@ -2060,12 +2062,12 @@ static int cortex_a8_read_apb_ab_memory(struct target *target,
 
 	/* Read the last word */
 	retval = mem_ap_sel_read_atomic_u32(swjdp, armv7a->debug_ap,
-				armv7a->debug_base + CPUDBG_DTRTX, (uint32_t *)&tmp_buff[(total_u32-1)<<2]);
+				armv7a->debug_base + CPUDBG_DTRTX, &tmp_buff[total_u32 - 1]);
 	if (retval != ERROR_OK)
 		goto error_free_buff_r;
 
 	/* Copy and align the data into the output buffer */
-	memcpy(buffer, &tmp_buff[start_byte], total_bytes);
+	memcpy(buffer, (uint8_t *)tmp_buff + start_byte, total_bytes);
 
 	free(tmp_buff);
 
@@ -2756,7 +2758,8 @@ static const struct command_registration cortex_a8_command_handlers[] = {
 };
 
 struct target_type cortexa8_target = {
-	.name = "cortex_a8",
+	.name = "cortex_a",
+	.deprecated_name = "cortex_a8",
 
 	.poll = cortex_a8_poll,
 	.arch_state = armv7a_arch_state,

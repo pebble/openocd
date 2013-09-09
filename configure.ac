@@ -1,5 +1,5 @@
 AC_PREREQ(2.60)
-AC_INIT([openocd], [0.7.0-pebble],
+AC_INIT([openocd], [0.8.0-dev-pebble],
   [OpenOCD Mailing List <openocd-devel@lists.sourceforge.net>])
 AC_CONFIG_SRCDIR([src/openocd.c])
 
@@ -422,11 +422,16 @@ case "${host_cpu}" in
     AC_ARG_ENABLE([at91rm9200],
       AS_HELP_STRING([--enable-at91rm9200], [Enable building support for AT91RM9200 based SBCs]),
       [build_at91rm9200=$enableval], [build_at91rm9200=no])
+
+    AC_ARG_ENABLE([bcm2835gpio],
+      AS_HELP_STRING([--enable-bcm2835gpio], [Enable building support for bitbanging on BCM2835 (as found in Raspberry Pi)]),
+      [build_bcm2835gpio=$enableval], [build_bcm2835gpio=no])
     ;;
 
   *)
     build_ep93xx=no
     build_at91rm9200=no
+    build_bcm2835gpio=no
     ;;
 esac
 
@@ -445,6 +450,14 @@ AC_ARG_ENABLE([presto_ftd2xx],
 AC_ARG_ENABLE([usbprog],
   AS_HELP_STRING([--enable-usbprog], [Enable building support for the usbprog JTAG Programmer]),
   [build_usbprog=$enableval], [build_usbprog=no])
+
+AC_ARG_ENABLE([openjtag_ftd2xx],
+  AS_HELP_STRING([--enable-openjtag_ftd2xx], [Enable building support for the OpenJTAG Programmer with ftd2xx driver]),
+  [build_openjtag_ftd2xx=$enableval], [build_openjtag_ftd2xx=no])
+
+AC_ARG_ENABLE([openjtag_ftdi],
+  AS_HELP_STRING([--enable-openjtag_ftdi], [Enable building support for the OpenJTAG Programmer with ftdi driver]),
+  [build_openjtag_ftdi=$enableval], [build_openjtag_ftdi=no])
 
 AC_ARG_ENABLE([oocd_trace],
   AS_HELP_STRING([--enable-oocd_trace],
@@ -503,9 +516,9 @@ AC_ARG_ENABLE([internal-jimtcl],
   AS_HELP_STRING([--disable-internal-jimtcl], [Disable building internal jimtcl]),
   [use_internal_jimtcl=$enableval], [use_internal_jimtcl=yes])
 
-AC_ARG_ENABLE([libusb0],
-  AS_HELP_STRING([--enable-libusb0], [Use libusb-0.1 library for USB JTAG devices]),
-  [check_libusb0=$enableval], [check_libusb0=no])
+AC_ARG_ENABLE([aice],
+  AS_HELP_STRING([--enable-aice], [Enable building support for the Andes JTAG Programmer]),
+  [build_aice=$enableval], [build_aice=no])
 
 build_minidriver=no
 AC_MSG_CHECKING([whether to enable ZY1000 minidriver])
@@ -664,6 +677,13 @@ else
   AC_DEFINE([BUILD_AT91RM9200], [0], [0 if you don't want at91rm9200.])
 fi
 
+if test $build_bcm2835gpio = yes; then
+  build_bitbang=yes
+  AC_DEFINE([BUILD_BCM2835GPIO], [1], [1 if you want bcm2835gpio.])
+else
+  AC_DEFINE([BUILD_BCM2835GPIO], [0], [0 if you don't want bcm2835gpio.])
+fi
+
 if test x$parport_use_ppdev = xyes; then
   AC_DEFINE([PARPORT_USE_PPDEV], [1], [1 if you want parport to use ppdev.])
 else
@@ -701,14 +721,12 @@ else
 fi
 
 if test $build_usb_blaster_libftdi = yes; then
-  build_bitbang=yes
   AC_DEFINE([BUILD_USB_BLASTER_LIBFTDI], [1], [1 if you want libftdi usb_blaster.])
 else
   AC_DEFINE([BUILD_USB_BLASTER_LIBFTDI], [0], [0 if you don't want libftdi usb_blaster.])
 fi
 
 if test $build_usb_blaster_ftd2xx = yes; then
-  build_bitbang=yes
   AC_DEFINE([BUILD_USB_BLASTER_FTD2XX], [1], [1 if you want ftd2xx usb_blaster.])
 else
   AC_DEFINE([BUILD_USB_BLASTER_FTD2XX], [0], [0 if you don't want ftd2xx usb_blaster.])
@@ -752,6 +770,19 @@ else
   AC_DEFINE([BUILD_USBPROG], [0], [0 if you don't want the usbprog JTAG driver.])
 fi
 
+AC_DEFINE([BUILD_OPENJTAG], [0], [0 if you don't want the OpenJTAG driver.])
+AC_DEFINE([BUILD_OPENJTAG_FTD2XX], [0], [0 if you don't want the OpenJTAG driver with FTD2XX driver.])
+AC_DEFINE([BUILD_OPENJTAG_LIBFTDI], [0], [0 if you don't want to build OpenJTAG driver with libftdi.])
+
+if test $build_openjtag_ftd2xx = yes; then
+  AC_DEFINE([BUILD_OPENJTAG], [1], [1 if you want the OpenJTAG driver.])
+  AC_DEFINE([BUILD_OPENJTAG_FTD2XX], [1], [1 if you want the OpenJTAG driver with FTD2XX driver.])
+fi
+if test $build_openjtag_ftdi = yes; then
+  AC_DEFINE([BUILD_OPENJTAG], [1], [1 if you want the OpenJTAG drvier.])
+  AC_DEFINE([BUILD_OPENJTAG_LIBFTDI], [1], [1 if you want to build OpenJTAG with FTDI driver.])
+fi
+
 if test $build_oocd_trace = yes; then
   AC_DEFINE([BUILD_OOCD_TRACE], [1], [1 if you want the OpenOCD+trace ETM capture driver.])
 else
@@ -762,6 +793,12 @@ if test $build_jlink = yes; then
   AC_DEFINE([BUILD_JLINK], [1], [1 if you want the J-Link JTAG driver.])
 else
   AC_DEFINE([BUILD_JLINK], [0], [0 if you don't want the J-Link JTAG driver.])
+fi
+
+if test $build_aice = yes; then
+  AC_DEFINE([BUILD_AICE], [1], [1 if you want the AICE JTAG driver.])
+else
+  AC_DEFINE([BUILD_AICE], [0], [0 if you don't want the AICE JTAG driver.])
 fi
 
 if test $build_vsllink = yes; then
@@ -841,7 +878,7 @@ then
   AC_MSG_ERROR([The option: with_ftd2xx_linux_tardir is for LINUX only.])
 fi
 
-if test $build_ft2232_ftd2xx = yes -o $build_presto_ftd2xx = yes -o $build_usb_blaster_ftd2xx = yes ; then
+if test $build_ft2232_ftd2xx = yes -o $build_presto_ftd2xx = yes -o $build_usb_blaster_ftd2xx = yes -o $build_openjtag_ftd2xx = yes; then
   AC_MSG_CHECKING([for ftd2xx.lib exists (win32)])
 
   # if we are given a zipdir...
@@ -911,7 +948,7 @@ then
    AC_MSG_ERROR([The option: --with-ftd2xx-win32-zipdir is for win32 only])
 fi
 
-if test $build_ft2232_ftd2xx = yes -o $build_presto_ftd2xx = yes -o $build_usb_blaster_ftd2xx = yes ; then
+if test $build_ft2232_ftd2xx = yes -o $build_presto_ftd2xx = yes -o $build_usb_blaster_ftd2xx = yes -o $build_openjtag_ftd2xx = yes; then
    # Must be linux
    if test $host_os != linux-gnu && test $host_os != linux ; then
       AC_MSG_ERROR([The (linux) ftd2xx library from FTDICHIP.com is linux only. Try --enable-ft2232-libftdi instead])
@@ -1058,7 +1095,8 @@ LDFLAGS=$LDFLAGS_SAVE
 CFLAGS=$CFLAGS_SAVE
 fi
 
-if test $build_ft2232_libftdi = yes ; then
+if test $build_ft2232_libftdi = yes -o $build_usb_blaster_libftdi = yes -o \
+  $build_openjtag_ftdi = yes; then
   # We assume: the package is preinstalled in the proper place
   # these present as 2 libraries..
   LIBS="$LIBS -lftdi -lusb"
@@ -1136,36 +1174,53 @@ enum ftdi_chip_type x = TYPE_232H;
   CFLAGS=$CFLAGS_SAVE
 fi
 
-# check for usb.h when a driver will require it
-build_usb=no
+# check if some driver requires libusb-0.1
+need_usb0=no
 if test $build_vsllink = yes -o $build_usbprog = yes -o \
-  $build_rlink = yes -o $build_ulink = yes -o $build_armjtagew = yes
-then
-  build_usb=yes
+        $build_rlink = yes -o $build_ulink = yes -o $build_armjtagew = yes; then
+  need_usb0=yes
 fi
 
-# Check for libusb1 ported drivers.
-build_usb_ng=no
-if test $build_jlink = yes -o $build_hladapter_stlink = yes -o $build_osbdm = yes -o \
-  $build_opendous = yes -o $build_ftdi = yes -o $build_hladapter_icdi = yes
-then
-  build_usb_ng=yes
+# check if some driver can work with either libusb version
+need_usb=no
+if test $build_jlink = yes -o $build_osbdm = yes -o $build_opendous = yes -o \
+	$build_aice = yes; then
+  need_usb=yes
+fi
+
+# check if some driver requires libusb-1.x
+need_usb_ng=no
+if test $build_ftdi = yes -o $build_hladapter_icdi = yes -o \
+        $build_hladapter_stlink = yes; then
+  need_usb_ng=yes
 fi
 
 # check for libusb library if necessary
-use_libusb0=no
 use_libusb1=no
-if test $build_usb = yes -o $build_usb_ng = yes; then
-  if test $check_libusb0 = no -a $build_usb_ng = yes; then
-	AC_CHECK_HEADER([libusb-1.0/libusb.h],
-			[AC_DEFINE(HAVE_LIBUSB1, 1, [Define if you have libusb-1.0]) check_libusb0=no use_libusb1=yes ],
-			[ check_libusb0=yes use_libusb1=no ])
-  fi
+if test $need_usb = yes -o $need_usb_ng = yes; then
+  AC_CHECK_HEADER([libusb-1.0/libusb.h], [
+	AC_DEFINE([HAVE_LIBUSB1], [1], [Define if you have libusb-1.x])
+	use_libusb1=yes
+	AC_SEARCH_LIBS([libusb_error_name], [usb-1.0],
+		[AC_DEFINE([HAVE_LIBUSB_ERROR_NAME], [1], [Define if your libusb has libusb_error_name()])],
+		[AC_MSG_WARN([libusb-1.x older than 1.0.9 detected, consider updating])])
+  ], [
+	if test $need_usb_ng = yes; then
+	  AC_MSG_ERROR([libusb-1.x is required for some driver(s) you've selected])
+	else
+	  AC_MSG_WARN([Trying legacy libusb-0.1 as a fallback, consider installing libusb-1 instead])
+	  need_usb0=yes
+	fi
+  ])
+fi
 
-  if test $check_libusb0 = yes -o $build_usb = yes; then
-	AC_CHECK_HEADERS([usb.h], [use_libusb0=yes],
-			[AC_MSG_ERROR([libusb or libusb-1.0 are required to build some OpenOCD driver(s)])])
-  fi
+use_libusb0=no
+if test $need_usb0 = yes; then
+	AC_CHECK_HEADERS([usb.h], [
+			use_libusb0=yes
+		], [
+			AC_MSG_ERROR([libusb-0.1 is required to build some OpenOCD driver(s)])
+		])
 fi
 
 AM_CONDITIONAL([RELEASE], [test $build_release = yes])
@@ -1177,19 +1232,23 @@ AM_CONDITIONAL([ZY1000], [test $build_zy1000 = yes])
 AM_CONDITIONAL([ZY1000_MASTER], [test $build_zy1000_master = yes])
 AM_CONDITIONAL([IOUTIL], [test $build_ioutil = yes])
 AM_CONDITIONAL([AT91RM9200], [test $build_at91rm9200 = yes])
+AM_CONDITIONAL([BCM2835GPIO], [test $build_bcm2835gpio = yes])
 AM_CONDITIONAL([BITBANG], [test $build_bitbang = yes])
 AM_CONDITIONAL([FT2232_LIBFTDI], [test $build_ft2232_libftdi = yes])
 AM_CONDITIONAL([FT2232_DRIVER], [test $build_ft2232_ftd2xx = yes -o $build_ft2232_libftdi = yes])
 AM_CONDITIONAL([FTDI_DRIVER], [test $build_ftdi = yes])
 AM_CONDITIONAL([USB_BLASTER_LIBFTDI], [test $build_usb_blaster_libftdi = yes])
+AM_CONDITIONAL([USB_BLASTER_FTD2XX], [test $build_usb_blaster_ftd2xx = yes])
 AM_CONDITIONAL([USB_BLASTER_DRIVER], [test $build_usb_blaster_ftd2xx = yes -o $build_usb_blaster_libftdi = yes])
 AM_CONDITIONAL([AMTJTAGACCEL], [test $build_amtjtagaccel = yes])
 AM_CONDITIONAL([GW16012], [test $build_gw16012 = yes])
 AM_CONDITIONAL([PRESTO_LIBFTDI], [test $build_presto_libftdi = yes])
 AM_CONDITIONAL([PRESTO_DRIVER], [test $build_presto_ftd2xx = yes -o $build_presto_libftdi = yes])
 AM_CONDITIONAL([USBPROG], [test $build_usbprog = yes])
+AM_CONDITIONAL([OPENJTAG], [test $build_openjtag_ftd2xx = yes -o $build_openjtag_ftdi = yes])
 AM_CONDITIONAL([OOCD_TRACE], [test $build_oocd_trace = yes])
 AM_CONDITIONAL([JLINK], [test $build_jlink = yes])
+AM_CONDITIONAL([AICE], [test $build_aice = yes])
 AM_CONDITIONAL([VSLLINK], [test $build_vsllink = yes])
 AM_CONDITIONAL([RLINK], [test $build_rlink = yes])
 AM_CONDITIONAL([ULINK], [test $build_ulink = yes])
@@ -1200,17 +1259,15 @@ AM_CONDITIONAL([HLADAPTER], [test $build_hladapter_stlink = yes -o $build_hladap
 AM_CONDITIONAL([OSBDM], [test $build_osbdm = yes])
 AM_CONDITIONAL([OPENDOUS], [test $build_opendous = yes])
 AM_CONDITIONAL([SYSFSGPIO], [test $build_sysfsgpio = yes])
-AM_CONDITIONAL([USB], [test $build_usb = yes])
-AM_CONDITIONAL([USB_NG], [test $build_usb_ng = yes])
 AM_CONDITIONAL([USE_LIBUSB0], [test $use_libusb0 = yes])
 AM_CONDITIONAL([USE_LIBUSB1], [test $use_libusb1 = yes])
 AM_CONDITIONAL([IS_CYGWIN], [test $is_cygwin = yes])
-AM_CONDITIONAL([IS_MINGW], [test $is_mingw = ye]s)
-AM_CONDITIONAL([IS_WIN32], [test $is_win32 = ye]s)
-AM_CONDITIONAL([IS_DARWIN], [test $is_darwin = ye]s)
+AM_CONDITIONAL([IS_MINGW], [test $is_mingw = yes])
+AM_CONDITIONAL([IS_WIN32], [test $is_win32 = yes])
+AM_CONDITIONAL([IS_DARWIN], [test $is_darwin = yes])
 AM_CONDITIONAL([BITQ], [test $build_bitq = yes])
 
-AM_CONDITIONAL([MINIDRIVER], [test $build_minidriver = ye]s)
+AM_CONDITIONAL([MINIDRIVER], [test $build_minidriver = yes])
 AM_CONDITIONAL([MINIDRIVER_DUMMY], [test $build_minidriver_dummy = yes])
 
 AM_CONDITIONAL([INTERNAL_JIMTCL], [test $use_internal_jimtcl = yes])
@@ -1312,7 +1369,9 @@ AC_CONFIG_FILES([
   src/helper/Makefile
   src/jtag/Makefile
   src/jtag/drivers/Makefile
+  src/jtag/drivers/usb_blaster/Makefile
   src/jtag/hla/Makefile
+  src/jtag/aice/Makefile
   src/transport/Makefile
   src/xsvf/Makefile
   src/svf/Makefile

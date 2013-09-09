@@ -15,15 +15,15 @@
 # *   You should have received a copy of the GNU General Public License     *
 # *   along with this program; if not, write to the                         *
 # *   Free Software Foundation, Inc.,                                       *
-# *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+# *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
 # ***************************************************************************
 
 include $(top_srcdir)/common.mk
 
 METASOURCES = AUTO
 noinst_LTLIBRARIES = librtos.la
-noinst_HEADERS = rtos.h rtos_standard_stackings.h rtos_ecos_stackings.h linux_header.h rtos_chibios_stackings.h
-librtos_la_SOURCES = rtos.c rtos_standard_stackings.c rtos_ecos_stackings.c rtos_chibios_stackings.c FreeRTOS.c ThreadX.c eCos.c linux.c ChibiOS.c Pebble_FreeRTOS.c
+noinst_HEADERS = rtos.h rtos_standard_stackings.h rtos_ecos_stackings.h linux_header.h rtos_chibios_stackings.h rtos_embkernel_stackings.h
+librtos_la_SOURCES = rtos.c rtos_standard_stackings.c rtos_ecos_stackings.c  rtos_chibios_stackings.c rtos_embkernel_stackings.c FreeRTOS.c ThreadX.c eCos.c linux.c ChibiOS.c embKernel.c
 
 librtos_la_CFLAGS =
 if IS_MINGW

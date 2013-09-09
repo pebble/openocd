@@ -21,7 +21,7 @@
  *   You should have received a copy of the GNU General Public License     *
  *   along with this program; if not, write to the                         *
  *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  *                                                                         *
  *                                                                         *
  *   Cortex-M3(tm) TRM, ARM DDI 0337E (r1p1) and 0337G (r2p0)              *
@@ -989,7 +989,8 @@ static int cortex_m3_assert_reset(struct target *target)
 
 	bool srst_asserted = false;
 
-	if (jtag_reset_config & RESET_SRST_NO_GATING) {
+	if ((jtag_reset_config & RESET_HAS_SRST) &&
+	    (jtag_reset_config & RESET_SRST_NO_GATING)) {
 		adapter_assert_reset();
 		srst_asserted = true;
 	}
@@ -1060,11 +1061,11 @@ static int cortex_m3_assert_reset(struct target *target)
 		if (retval != ERROR_OK)
 			return retval;
 
-		LOG_DEBUG("Using Cortex-M3 %s", (reset_config == CORTEX_M3_RESET_SYSRESETREQ)
+		LOG_DEBUG("Using Cortex-M %s", (reset_config == CORTEX_M3_RESET_SYSRESETREQ)
 			? "SYSRESETREQ" : "VECTRESET");
 
 		if (reset_config == CORTEX_M3_RESET_VECTRESET) {
-			LOG_WARNING("Only resetting the Cortex-M3 core, use a reset-init event "
+			LOG_WARNING("Only resetting the Cortex-M core, use a reset-init event "
 				"handler to reset any peripherals or configure hardware srst support.");
 		}
 
@@ -2050,7 +2051,7 @@ static int cortex_m3_verify_pointer(struct command_context *cmd_ctx,
 	struct cortex_m3_common *cm3)
 {
 	if (cm3->common_magic != CORTEX_M3_COMMON_MAGIC) {
-		command_print(cmd_ctx, "target is not a Cortex-M3");
+		command_print(cmd_ctx, "target is not a Cortex-M");
 		return ERROR_TARGET_INVALID;
 	}
 	return ERROR_OK;

@@ -25,7 +25,7 @@
  *   You should have received a copy of the GNU General Public License     *
  *   along with this program; if not, write to the                         *
  *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -519,7 +519,8 @@ static const struct command_registration interface_command_handlers[] = {
 			"[srst_pulls_trst|trst_pulls_srst|combined|separate] "
 			"[srst_gates_jtag|srst_nogate] "
 			"[trst_push_pull|trst_open_drain] "
-			"[srst_push_pull|srst_open_drain]",
+			"[srst_push_pull|srst_open_drain] "
+			"[connect_deassert_srst|connect_assert_srst]",
 	},
 	COMMAND_REGISTRATION_DONE
 };

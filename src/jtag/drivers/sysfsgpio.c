@@ -14,7 +14,7 @@
  *   You should have received a copy of the GNU General Public License     *
  *   along with this program; if not, write to the                         *
  *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  ***************************************************************************/
 /**
  * @file
@@ -475,14 +475,18 @@ static int sysfsgpio_init(void)
 		goto out_error;
 
 	/* assume active low*/
-	trst_fd = setup_sysfs_gpio(trst_gpio, 1, 1);
-	if (trst_gpio > 0 && trst_fd < 0)
-		goto out_error;
+	if (trst_gpio > 0) {
+		trst_fd = setup_sysfs_gpio(trst_gpio, 1, 1);
+		if (trst_fd < 0)
+			goto out_error;
+	}
 
 	/* assume active low*/
-	srst_fd = setup_sysfs_gpio(srst_gpio, 1, 1);
-	if (srst_gpio > 0 && srst_fd < 0)
-		goto out_error;
+	if (srst_gpio > 0) {
+		srst_fd = setup_sysfs_gpio(srst_gpio, 1, 1);
+		if (srst_fd < 0)
+			goto out_error;
+	}
 
 	return ERROR_OK;
 

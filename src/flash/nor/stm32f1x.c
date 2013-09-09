@@ -21,7 +21,7 @@
  *   You should have received a copy of the GNU General Public License     *
  *   along with this program; if not, write to the                         *
  *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -927,6 +927,7 @@ static int stm32x_probe(struct flash_bank *bank)
 		stm32x_info->default_rdp = 0x55AA;
 		break;
 	case 0x440: /* stm32f0x */
+	case 0x444:
 		page_size = 1024;
 		stm32x_info->ppage_size = 4;
 		max_flash_size_in_kb = 64;
@@ -1194,7 +1195,8 @@ static int get_stm32x_info(struct flash_bank *bank, char *buf, int buf_size)
 				snprintf(buf, buf_size, "unknown");
 				break;
 		}
-	} else if ((device_id & 0xfff) == 0x440) {
+	} else if (((device_id & 0xfff) == 0x440) ||
+			((device_id & 0xfff) == 0x444)) {
 		printed = snprintf(buf, buf_size, "stm32f0x - Rev: ");
 		buf += printed;
 		buf_size -= printed;

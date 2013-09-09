@@ -36,7 +36,7 @@
  *   You should have received a copy of the GNU General Public License     *
  *   along with this program; if not, write to the                         *
  *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -89,6 +89,9 @@ extern struct target_type dsp5680xx_target;
 extern struct target_type testee_target;
 extern struct target_type avr32_ap7k_target;
 extern struct target_type hla_target;
+extern struct target_type nds32_v2_target;
+extern struct target_type nds32_v3_target;
+extern struct target_type nds32_v3m_target;
 
 static struct target_type *target_types[] = {
 	&arm7tdmi_target,
@@ -113,6 +116,9 @@ static struct target_type *target_types[] = {
 	&testee_target,
 	&avr32_ap7k_target,
 	&hla_target,
+	&nds32_v2_target,
+	&nds32_v3_target,
+	&nds32_v3m_target,
 	NULL,
 };
 

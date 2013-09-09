@@ -16,7 +16,7 @@
 #*   You should have received a copy of the GNU General Public License     *
 #*   along with this program; if not, write to the                         *
 #*   Free Software Foundation, Inc.,                                       *
-#*   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+#*   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
 #***************************************************************************
 
 # A simple utility to read a list of files (names composed by numeric prescaler arguments) and compose a C source file defining data structures which hold the binary data read from those files.
@@ -32,7 +32,7 @@ print <<HEADER;
 #endif
 
 #include "rlink.h"
-#include "st7.h"
+#include "rlink_st7.h"
 
 HEADER
 
@@ -49,12 +49,12 @@ for $prescaler (sort {$b <=> $a} @ARGV) {
 	$bytes =~ s/(^|\s)(.{70}?\S*)/\2\n/go;	# break up long lines
 	$bytes =~ s/\n +/\n/go;
 	$bytes =~ s/(^|\n)/\1\t/go;		# format nicely
-	printf("static const u8 dtc_%d[] = {\n%s\n};\n\n", $prescaler, $bytes);
+	printf("static const uint8_t dtc_%d[] = {\n%s\n};\n\n", $prescaler, $bytes);
 	push(@speed_table, sprintf("\tdtc_%d, sizeof(dtc_%d), (ST7_FOSC * 2) / (1000 * %d), %d\n", $prescaler, $prescaler, $prescaler, $prescaler));
 }
 
-printf("const rlink_speed_table_t rlink_speed_table[] = {{\n%s}};\n\n", join("}, {\n", @speed_table));
-printf("const size_t rlink_speed_table_size = sizeof(rlink_speed_table) / sizeof(*rlink_speed_table);\n\n");
+printf("const struct rlink_speed_table rlink_speed_table[] = { {\n%s} };\n\n", join("}, {\n", @speed_table));
+printf("const size_t rlink_speed_table_size = ARRAY_SIZE(rlink_speed_table);\n\n");
 
 
 sub byte_array_from_file {

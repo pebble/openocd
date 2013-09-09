@@ -15,7 +15,7 @@
  *   You should have received a copy of the GNU General Public License     *
  *   along with this program; if not, write to the                         *
  *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -135,7 +135,8 @@ static bool open_matching_device(struct mpsse_ctx *ctx, const uint16_t *vid, con
 
 		err = libusb_open(device, &ctx->usb_dev);
 		if (err != LIBUSB_SUCCESS) {
-			LOG_ERROR("libusb_open() failed with %d", err);
+			LOG_ERROR("libusb_open() failed with %s",
+				  libusb_error_name(err));
 			continue;
 		}
 

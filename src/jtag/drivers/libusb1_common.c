@@ -16,7 +16,7 @@
  *   You should have received a copy of the GNU General Public License     *
  *   along with this program; if not, write to the                         *
  *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -62,8 +62,11 @@ int jtag_libusb_open(const uint16_t vids[], const uint16_t pids[],
 		/** Free the device list **/
 		libusb_free_device_list(devs, 1);
 
-		if (errCode < 0)
+		if (errCode) {
+			LOG_ERROR("libusb_open() failed with %s",
+				  libusb_error_name(errCode));
 			return errCode;
+		}
 		return 0;
 	}
 	return -ENODEV;

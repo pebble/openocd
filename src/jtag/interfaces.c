@@ -25,7 +25,7 @@
  *   You should have received a copy of the GNU General Public License     *
  *   along with this program; if not, write to the                         *
  *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -83,6 +83,9 @@ extern struct jtag_interface presto_interface;
 #if BUILD_USBPROG == 1
 extern struct jtag_interface usbprog_interface;
 #endif
+#if BUILD_OPENJTAG == 1
+extern struct jtag_interface openjtag_interface;
+#endif
 #if BUILD_JLINK == 1
 extern struct jtag_interface jlink_interface;
 #endif
@@ -115,6 +118,12 @@ extern struct jtag_interface opendous_interface;
 #endif
 #if BUILD_SYSFSGPIO == 1
 extern struct jtag_interface sysfsgpio_interface;
+#endif
+#if BUILD_AICE == 1
+extern struct jtag_interface aice_interface;
+#endif
+#if BUILD_BCM2835GPIO == 1
+extern struct jtag_interface bcm2835gpio_interface;
 #endif
 #endif /* standard drivers */
 
@@ -167,6 +176,9 @@ struct jtag_interface *jtag_interfaces[] = {
 #if BUILD_USBPROG == 1
 		&usbprog_interface,
 #endif
+#if BUILD_OPENJTAG == 1
+		&openjtag_interface,
+#endif
 #if BUILD_JLINK == 1
 		&jlink_interface,
 #endif
@@ -199,6 +211,12 @@ struct jtag_interface *jtag_interfaces[] = {
 #endif
 #if BUILD_SYSFSGPIO == 1
 		&sysfsgpio_interface,
+#endif
+#if BUILD_AICE == 1
+		&aice_interface,
+#endif
+#if BUILD_BCM2835GPIO == 1
+		&bcm2835gpio_interface,
 #endif
 #endif /* standard drivers */
 		NULL,
