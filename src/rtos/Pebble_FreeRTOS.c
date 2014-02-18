@@ -31,7 +31,7 @@
 #include "helper/types.h"
 #include "rtos_standard_stackings.h"
 
-#define PEBBLE_FREERTOS_MAX_PRIORITIES	63
+#define PEBBLE_FREERTOS_MAX_PRIORITIES	5
 
 #define Pebble_FreeRTOS_STRUCT(int_type, ptr_type, list_prev_offset)
 
@@ -58,7 +58,7 @@ const struct Pebble_FreeRTOS_params Pebble_FreeRTOS_params_list[] = {
 	8,						/* list_elem_next_offset; */
 	12,						/* list_elem_content_offset */
 	0,						/* thread_stack_offset; */
-	76,						/* thread_name_offset; */
+	52,						/* thread_name_offset; */
 	&rtos_standard_Cortex_M3_Pebble_stacking,	/* stacking_info */
     }
 };
@@ -91,7 +91,6 @@ enum Pebble_FreeRTOS_symbol_values {
 	Pebble_FreeRTOS_VAL_xTasksWaitingTermination = 7,
 	Pebble_FreeRTOS_VAL_xSuspendedTaskList = 8,
 	Pebble_FreeRTOS_VAL_uxCurrentNumberOfTasks = 9,
-	Pebble_FreeRTOS_VAL_uxTopUsedPriority = 10,
 };
 
 static char *Pebble_FreeRTOS_symbol_list[] = {
@@ -105,7 +104,6 @@ static char *Pebble_FreeRTOS_symbol_list[] = {
 	"xTasksWaitingTermination",
 	"xSuspendedTaskList",
 	"uxCurrentNumberOfTasks",
-	"uxTopUsedPriority",
 	NULL
 };
 
@@ -212,30 +210,16 @@ static int Pebble_FreeRTOS_update_threads(struct rtos *rtos)
 		}
 	}
 
-	/* Find out how many lists are needed to be read from pxReadyTasksLists, */
-	int64_t max_used_priority = 0;
-	retval = target_read_buffer(rtos->target,
-			rtos->symbols[Pebble_FreeRTOS_VAL_uxTopUsedPriority].address,
-			param->pointer_width,
-			(uint8_t *)&max_used_priority);
-	if (retval != ERROR_OK)
-		return retval;
-	if (max_used_priority > PEBBLE_FREERTOS_MAX_PRIORITIES) {
-		LOG_ERROR("Pebble_FreeRTOS maximum used priority is unreasonably big, not proceeding: %" PRId64 "",
-			max_used_priority);
-		return ERROR_FAIL;
-	}
-
 	symbol_address_t *list_of_lists =
 		(symbol_address_t *)malloc(sizeof(symbol_address_t) *
-			(max_used_priority+1 + 5));
+			(PEBBLE_FREERTOS_MAX_PRIORITIES + 5));
 	if (!list_of_lists) {
-		LOG_ERROR("Error allocating memory for %" PRId64 " priorities", max_used_priority);
+		LOG_ERROR("Error allocating memory for %d priorities", PEBBLE_FREERTOS_MAX_PRIORITIES);
 		return ERROR_FAIL;
 	}
 
 	int num_lists;
-	for (num_lists = 0; num_lists <= max_used_priority; num_lists++)
+	for (num_lists = 0; num_lists <= (PEBBLE_FREERTOS_MAX_PRIORITIES - 1); num_lists++)
 		list_of_lists[num_lists] = rtos->symbols[Pebble_FreeRTOS_VAL_pxReadyTasksLists].address +
 			num_lists * param->list_width;
 
