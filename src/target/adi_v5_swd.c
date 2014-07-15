@@ -55,68 +55,153 @@
 
 #include <jtag/swd.h>
 
+/* YUK! - but this is currently a global.... */
+extern struct jtag_interface *jtag_interface;
+static bool do_sync;
+
+static void swd_finish_read(struct adiv5_dap *dap)
+{
+	const struct swd_driver *swd = jtag_interface->swd;
+	if (dap->last_read != NULL) {
+		swd->read_reg(dap, swd_cmd(true, false, DP_RDBUFF), dap->last_read);
+		dap->last_read = NULL;
+	}
+}
+
+static int swd_queue_dp_write(struct adiv5_dap *dap, unsigned reg,
+		uint32_t data);
+
+static void swd_clear_sticky_errors(struct adiv5_dap *dap)
+{
+	const struct swd_driver *swd = jtag_interface->swd;
+	assert(swd);
+
+	swd->write_reg(dap, swd_cmd(false,  false, DP_ABORT),
+		STKCMPCLR | STKERRCLR | WDERRCLR | ORUNERRCLR);
+}
+
+static int swd_run_inner(struct adiv5_dap *dap)
+{
+	const struct swd_driver *swd = jtag_interface->swd;
+
+	int retval = swd->run(dap);
+
+	if (retval != ERROR_OK) {
+		/* fault response */
+		swd_clear_sticky_errors(dap);
+	}
+
+	return retval;
+}
+
+static inline int check_sync(struct adiv5_dap *dap)
+{
+	return do_sync ? swd_run_inner(dap) : ERROR_OK;
+}
+
+static int swd_queue_ap_abort(struct adiv5_dap *dap, uint8_t *ack)
+{
+	const struct swd_driver *swd = jtag_interface->swd;
+	assert(swd);
+
+	swd->write_reg(dap, swd_cmd(false,  false, DP_ABORT),
+		DAPABORT | STKCMPCLR | STKERRCLR | WDERRCLR | ORUNERRCLR);
+	return check_sync(dap);
+}
+
+/** Select the DP register bank matching bits 7:4 of reg. */
+static void swd_queue_dp_bankselect(struct adiv5_dap *dap, unsigned reg)
+{
+	uint32_t select_dp_bank = (reg & 0x000000F0) >> 4;
+
+	if (reg == DP_SELECT)
+		return;
+
+	if (select_dp_bank == dap->dp_bank_value)
+		return;
+
+	dap->dp_bank_value = select_dp_bank;
+	select_dp_bank |= dap->ap_current | dap->ap_bank_value;
+
+	swd_queue_dp_write(dap, DP_SELECT, select_dp_bank);
+}
+
 static int swd_queue_dp_read(struct adiv5_dap *dap, unsigned reg,
 		uint32_t *data)
 {
-	/* REVISIT status return vs ack ... */
-	return swd->read_reg(swd_cmd(true,  false, reg), data);
+	const struct swd_driver *swd = jtag_interface->swd;
+	assert(swd);
+
+	swd_queue_dp_bankselect(dap, reg);
+	swd->read_reg(dap, swd_cmd(true,  false, reg), data);
+
+	return check_sync(dap);
 }
 
-static int swd_queue_idcode_read(struct adiv5_dap *dap,
-		uint8_t *ack, uint32_t *data)
-{
-	int status = swd_queue_dp_read(dap, DP_IDCODE, data);
-	if (status < 0)
-		return status;
-	*ack = status;
-	/* ?? */
-	return ERROR_OK;
-}
 
-static int (swd_queue_dp_write)(struct adiv5_dap *dap, unsigned reg,
+static int swd_queue_dp_write(struct adiv5_dap *dap, unsigned reg,
 		uint32_t data)
 {
-	/* REVISIT status return vs ack ... */
-	return swd->write_reg(swd_cmd(false,  false, reg), data);
+	const struct swd_driver *swd = jtag_interface->swd;
+	assert(swd);
+
+	swd_finish_read(dap);
+	swd_queue_dp_bankselect(dap, reg);
+	swd->write_reg(dap, swd_cmd(false,  false, reg), data);
+
+	return check_sync(dap);
 }
 
+/** Select the AP register bank matching bits 7:4 of reg. */
+static void swd_queue_ap_bankselect(struct adiv5_dap *dap, unsigned reg)
+{
+	uint32_t select_ap_bank = reg & 0x000000F0;
 
-static int (swd_queue_ap_read)(struct adiv5_dap *dap, unsigned reg,
+	if (select_ap_bank == dap->ap_bank_value)
+		return;
+
+	dap->ap_bank_value = select_ap_bank;
+	select_ap_bank |= dap->ap_current | dap->dp_bank_value;
+
+	swd_queue_dp_write(dap, DP_SELECT, select_ap_bank);
+}
+
+static int swd_queue_ap_read(struct adiv5_dap *dap, unsigned reg,
 		uint32_t *data)
 {
-	/* REVISIT  APSEL ... */
-	/* REVISIT status return ... */
-	return swd->read_reg(swd_cmd(true,  true, reg), data);
+	const struct swd_driver *swd = jtag_interface->swd;
+	assert(swd);
+
+	swd_queue_ap_bankselect(dap, reg);
+	swd->read_reg(dap, swd_cmd(true,  true, reg), dap->last_read);
+	dap->last_read = data;
+
+	return check_sync(dap);
 }
 
-static int (swd_queue_ap_write)(struct adiv5_dap *dap, unsigned reg,
+static int swd_queue_ap_write(struct adiv5_dap *dap, unsigned reg,
 		uint32_t data)
 {
-	/* REVISIT  APSEL ... */
-	/* REVISIT status return ... */
-	return swd->write_reg(swd_cmd(false,  true, reg), data);
-}
+	const struct swd_driver *swd = jtag_interface->swd;
+	assert(swd);
 
-static int (swd_queue_ap_abort)(struct adiv5_dap *dap, uint8_t *ack)
-{
-	return ERROR_FAIL;
+	swd_finish_read(dap);
+	swd_queue_ap_bankselect(dap, reg);
+	swd->write_reg(dap, swd_cmd(false,  true, reg), data);
+
+	return check_sync(dap);
 }
 
 /** Executes all queued DAP operations. */
 static int swd_run(struct adiv5_dap *dap)
 {
-	/* for now the SWD interface hard-wires a zero-size queue.  */
-
-	/* FIXME but we still need to check and scrub
-	 * any hardware errors ...
-	 */
-	return ERROR_OK;
+	swd_finish_read(dap);
+	return swd_run_inner(dap);
 }
 
 const struct dap_ops swd_dap_ops = {
 	.is_swd = true,
 
-	.queue_idcode_read = swd_queue_idcode_read,
 	.queue_dp_read = swd_queue_dp_read,
 	.queue_dp_write = swd_queue_dp_write,
 	.queue_ap_read = swd_queue_ap_read,
@@ -185,8 +270,6 @@ int dap_to_swd(struct target *target)
 	return retval;
 }
 
-
-
 COMMAND_HANDLER(handle_swd_wcr)
 {
 	int retval;
@@ -209,7 +292,7 @@ COMMAND_HANDLER(handle_swd_wcr)
 		}
 
 		command_print(CMD_CTX,
-			"turnaround=%d, prescale=%d",
+			"turnaround=%" PRIu32 ", prescale=%" PRIu32,
 			WCR_TO_TRN(wcr),
 			WCR_TO_PRESCALE(wcr));
 	return ERROR_OK;
@@ -280,13 +363,14 @@ static const struct command_registration swd_handlers[] = {
 
 static int swd_select(struct command_context *ctx)
 {
-	struct target *target = get_current_target(ctx);
 	int retval;
 
 	retval = register_commands(ctx, NULL, swd_handlers);
 
 	if (retval != ERROR_OK)
 		return retval;
+
+	const struct swd_driver *swd = jtag_interface->swd;
 
 	 /* be sure driver is in SWD mode; start
 	  * with hardware default TRN (1), it can be changed later
@@ -296,14 +380,20 @@ static int swd_select(struct command_context *ctx)
 		return ERROR_FAIL;
 	}
 
-	 retval = swd->init(1);
+	retval = swd->init();
 	if (retval != ERROR_OK) {
 		LOG_DEBUG("can't init SWD driver");
 		return retval;
 	}
 
 	/* force DAP into SWD mode (not JTAG) */
-	retval = dap_to_swd(target);
+	/*retval = dap_to_swd(target);*/
+
+	if (ctx->current_target) {
+		/* force DAP into SWD mode (not JTAG) */
+		struct target *target = get_current_target(ctx);
+		retval = dap_to_swd(target);
+	}
 
 	return retval;
 }
@@ -316,6 +406,10 @@ static int swd_init(struct command_context *ctx)
 	uint32_t idcode;
 	int status;
 
+	/* Force the DAP's ops vector for SWD mode.
+	 * messy - is there a better way? */
+	arm->dap->ops = &swd_dap_ops;
+
 	/* FIXME validate transport config ... is the
 	 * configured DAP present (check IDCODE)?
 	 * Is *only* one DAP configured?
@@ -325,15 +419,17 @@ static int swd_init(struct command_context *ctx)
 
  /* Note, debugport_init() does setup too */
 
-	uint8_t ack;
+	swd_queue_dp_read(dap, DP_IDCODE, &idcode);
 
-	status = swd_queue_idcode_read(dap, &ack, &idcode);
+	/* force clear all sticky faults */
+	swd_clear_sticky_errors(dap);
+
+	status = swd_run(dap);
 
 	if (status == ERROR_OK)
-		LOG_INFO("SWD IDCODE %#8.8x", idcode);
+		LOG_INFO("SWD IDCODE %#8.8" PRIx32, idcode);
 
 	return status;
-
 }
 
 static struct transport swd_transport = {

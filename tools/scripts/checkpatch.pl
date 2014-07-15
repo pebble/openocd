@@ -261,7 +261,8 @@ our $logFunctions = qr{(?x:
 	[a-z0-9]+_(?:printk|emerg|alert|crit|err|warning|warn|notice|info|debug|dbg|vdbg|devel|cont|WARN)(?:_ratelimited|_once|)|
 	WARN(?:_RATELIMIT|_ONCE|)|
 	panic|
-	MODULE_[A-Z_]+
+	MODULE_[A-Z_]+|
+	LOG_(?:DEBUG|INFO|WARNING|ERROR|USER|USER_N|OUTPUT)+
 )};
 
 our $signature_tags = qr{(?xi:
@@ -445,6 +446,8 @@ sub parse_email {
 			$address = "";
 			$comment = "";
 		}
+	} elsif ($formatted_email eq "jenkins") {
+		$address = "jenkins"
 	}
 
 	$name =~ s/^\s+|\s+$//g;
@@ -3329,7 +3332,8 @@ sub process {
 $vname has style problems, please review.
 
 If any of these errors are false positives, please report
-them to the maintainer, see CHECKPATCH in MAINTAINERS.
+them to the openocd-devel mailing list or prepare a patch
+and send it to Gerrit for review.
 EOM
 	}
 

@@ -6,12 +6,15 @@ else
 OOCD_TRACE_FILES =
 endif
 
+SUBDIRS = openrisc
+libtarget_la_LIBADD = $(top_builddir)/src/target/openrisc/libopenrisc.la
+
 BIN2C		= $(top_builddir)/src/helper/bin2char$(EXEEXT_FOR_BUILD)
 
 DEBUG_HANDLER	= $(srcdir)/xscale/debug_handler.bin
 EXTRA_DIST = \
 	startup.tcl \
-	$(DEBUG_HANDLER)
+	$(wildcard $(srcdir)/xscale/*)
 
 DEBUG_HEADER	= xscale_debug.h
 BUILT_SOURCES = $(DEBUG_HEADER)
@@ -32,6 +35,7 @@ libtarget_la_SOURCES = \
 	$(AVR32_SRC) \
 	$(MIPS32_SRC) \
 	$(NDS32_SRC) \
+	$(INTEL_IA32_SRC) \
 	avrt.c \
 	dsp563xx.c \
 	dsp563xx_once.c \
@@ -88,6 +92,7 @@ ARM_DEBUG_SRC = \
 	arm_adi_v5.c \
 	adi_v5_jtag.c \
 	adi_v5_swd.c \
+	adi_v5_cmsis_dap.c \
 	embeddedice.c \
 	trace.c \
 	etb.c \
@@ -120,6 +125,10 @@ NDS32_SRC = \
 	nds32_v3m.c \
 	nds32_aice.c
 
+INTEL_IA32_SRC = \
+	quark_x10xx.c \
+	lakemont.c \
+	x86_32_common.c
 
 noinst_HEADERS = \
 	algorithm.h \
@@ -187,7 +196,9 @@ noinst_HEADERS = \
 	nds32_v3_common.h \
 	nds32_v3.h \
 	nds32_v3m.h \
-	nds32_aice.h
+	nds32_aice.h \
+	lakemont.h \
+	x86_32_common.h
 
 ocddatadir = $(pkglibdir)
 nobase_dist_ocddata_DATA =

@@ -83,7 +83,7 @@ struct embKernel_params {
 
 struct embKernel_params embKernel_params_list[] = {
 		{
-			"cortex_m3", /* target_name */
+			"cortex_m", /* target_name */
 			4, /* pointer_width */
 			4, /* thread_count_width */
 			8, /*rtos_list_size */
@@ -93,7 +93,7 @@ struct embKernel_params embKernel_params_list[] = {
 			4, /*thread_priority_width */
 			4, /*iterable_next_offset */
 			12, /*iterable_task_owner_offset */
-			&rtos_embkernel_Cortex_M3_stacking, /* stacking_info*/
+			&rtos_embkernel_Cortex_M_stacking, /* stacking_info*/
 		},
 		{ "hla_target", /* target_name */
 			4, /* pointer_width */
@@ -105,7 +105,7 @@ struct embKernel_params embKernel_params_list[] = {
 			4, /*thread_priority_width */
 			4, /*iterable_next_offset */
 			12, /*iterable_task_owner_offset */
-			&rtos_embkernel_Cortex_M3_stacking, /* stacking_info */
+			&rtos_embkernel_Cortex_M_stacking, /* stacking_info */
 		}
 };
 
@@ -131,7 +131,7 @@ static int embKernel_create(struct target *target)
 		return -1;
 	}
 
-	target->rtos->rtos_specific_params = (void *) &embKernel_params_list[i];
+	target->rtos->rtos_specific_params = &embKernel_params_list[i];
 	return 0;
 }
 
@@ -169,7 +169,7 @@ static int embKernel_get_tasks_details(struct rtos *rtos, int64_t iterable, cons
 			(uint8_t *) &priority);
 	if (retval != ERROR_OK)
 		return retval;
-	details->extra_info_str = (char *) malloc(EMBKERNEL_MAX_THREAD_NAME_STR_SIZE);
+	details->extra_info_str = malloc(EMBKERNEL_MAX_THREAD_NAME_STR_SIZE);
 	if (task == rtos->current_thread) {
 		snprintf(details->extra_info_str, EMBKERNEL_MAX_THREAD_NAME_STR_SIZE, "Pri=%u, Running",
 				(unsigned int) priority);
@@ -206,25 +206,7 @@ static int embKernel_update_threads(struct rtos *rtos)
 	}
 
 	/* wipe out previous thread details if any */
-	if (rtos->thread_details != NULL) {
-		int j;
-		for (j = 0; j < rtos->thread_count; j++) {
-			if (rtos->thread_details[j].display_str != NULL) {
-				free(rtos->thread_details[j].display_str);
-				rtos->thread_details[j].display_str = NULL;
-			}
-			if (rtos->thread_details[j].thread_name_str != NULL) {
-				free(rtos->thread_details[j].thread_name_str);
-				rtos->thread_details[j].thread_name_str = NULL;
-			}
-			if (rtos->thread_details[j].extra_info_str != NULL) {
-				free(rtos->thread_details[j].extra_info_str);
-				rtos->thread_details[j].extra_info_str = NULL;
-			}
-		}
-		free(rtos->thread_details);
-		rtos->thread_details = NULL;
-	}
+	rtos_free_threadlist(rtos);
 
 	param = (const struct embKernel_params *) rtos->rtos_specific_params;
 
@@ -251,7 +233,7 @@ static int embKernel_update_threads(struct rtos *rtos)
 	}
 
 	/* create space for new thread details */
-	rtos->thread_details = (struct thread_detail *) malloc(sizeof(struct thread_detail) * thread_list_size);
+	rtos->thread_details = malloc(sizeof(struct thread_detail) * thread_list_size);
 	if (!rtos->thread_details) {
 		LOG_ERROR("Error allocating memory for %d threads", thread_list_size);
 		return ERROR_FAIL;
@@ -353,7 +335,7 @@ static int embKernel_get_thread_reg_list(struct rtos *rtos, int64_t thread_id, c
 static int embKernel_get_symbol_list_to_lookup(symbol_table_elem_t *symbol_list[])
 {
 	unsigned int i;
-	*symbol_list = (symbol_table_elem_t *) malloc(sizeof(symbol_table_elem_t) * ARRAY_SIZE(embKernel_symbol_list));
+	*symbol_list = malloc(sizeof(symbol_table_elem_t) * ARRAY_SIZE(embKernel_symbol_list));
 
 	for (i = 0; i < ARRAY_SIZE(embKernel_symbol_list); i++)
 		(*symbol_list)[i].symbol_name = embKernel_symbol_list[i];

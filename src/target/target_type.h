@@ -101,7 +101,8 @@ struct target_type {
 	 * list, however it is after GDB is connected that monitor commands can
 	 * be run to properly initialize the target
 	 */
-	int (*get_gdb_reg_list)(struct target *target, struct reg **reg_list[], int *reg_list_size);
+	int (*get_gdb_reg_list)(struct target *target, struct reg **reg_list[],
+			int *reg_list_size, enum target_register_class reg_class);
 
 	/* target memory access
 	* size: 1 = byte (8bit), 2 = half-word (16bit), 4 = word (32bit)
@@ -128,14 +129,6 @@ struct target_type {
 	/* Default implementation will do some fancy alignment to improve performance, target can override */
 	int (*write_buffer)(struct target *target, uint32_t address,
 			uint32_t size, const uint8_t *buffer);
-
-	/**
-	 * Write target memory in multiples of 4 bytes, optimized for
-	 * writing large quantities of data.  Do @b not call this
-	 * function directly, use target_bulk_write_memory() instead.
-	 */
-	int (*bulk_write_memory)(struct target *target, uint32_t address,
-			uint32_t count, const uint8_t *buffer);
 
 	int (*checksum_memory)(struct target *target, uint32_t address,
 			uint32_t count, uint32_t *checksum);
@@ -172,6 +165,11 @@ struct target_type {
 	 * However, this method can be invoked on unresponsive targets.
 	 */
 	int (*remove_watchpoint)(struct target *target, struct watchpoint *watchpoint);
+
+	/* Find out just hit watchpoint. After the target hits a watchpoint, the
+	 * information could assist gdb to locate where the modified/accessed memory is.
+	 */
+	int (*hit_watchpoint)(struct target *target, struct watchpoint **hit_watchpoint);
 
 	/**
 	 * Target algorithm support.  Do @b not call this method directly,
@@ -258,6 +256,19 @@ struct target_type {
 	 * circumstances.
 	 */
 	int (*check_reset)(struct target *target);
+
+	/* get GDB file-I/O parameters from target
+	 */
+	int (*get_gdb_fileio_info)(struct target *target, struct gdb_fileio_info *fileio_info);
+
+	/* pass GDB file-I/O response to target
+	 */
+	int (*gdb_fileio_end)(struct target *target, int retcode, int fileio_errno, bool ctrl_c);
+
+	/* do target profiling
+	 */
+	int (*profiling)(struct target *target, uint32_t *samples,
+			uint32_t max_num_samples, uint32_t *num_samples, uint32_t seconds);
 };
 
 #endif /* TARGET_TYPE_H */

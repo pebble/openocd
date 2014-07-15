@@ -123,7 +123,7 @@ size_t strnlen(const char *s, size_t maxlen)
 char *strndup(const char *s, size_t n)
 {
 	size_t len = strnlen(s, n);
-	char *new = (char *) malloc(len + 1);
+	char *new = malloc(len + 1);
 
 	if (new == NULL)
 		return NULL;
@@ -278,7 +278,7 @@ int win_select(int max_fd, fd_set *rfds, fd_set *wfds, fd_set *efds, struct time
 #endif
 
 #if defined HAVE_LIBUSB1 && !defined HAVE_LIBUSB_ERROR_NAME
-#include <libusb-1.0/libusb.h>
+#include <libusb.h>
 /* Verbatim from git://git.libusb.org/libusb.git tag 1.0.9
  * The libusb_error enum is compatible down to v0.9.1
  */

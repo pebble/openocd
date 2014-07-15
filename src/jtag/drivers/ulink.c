@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2011 by Martin Schmoelzer                               *
+ *   Copyright (C) 2011-2013 by Martin Schmoelzer                          *
  *   <martin.schmoelzer@student.tuwien.ac.at>                              *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -26,7 +26,7 @@
 #include <jtag/interface.h>
 #include <jtag/commands.h>
 #include <target/image.h>
-#include "usb_common.h"
+#include <libusb.h>
 #include "OpenULINK/include/msgtypes.h"
 
 /** USB Vendor ID of ULINK device in unconfigured state (no firmware loaded
@@ -63,7 +63,7 @@
 #define ULINK_RENUMERATION_DELAY 1500000
 
 /** Default location of OpenULINK firmware image. */
-#define ULINK_FIRMWARE_FILE      PKGLIBDIR "/OpenULINK/ulink_firmware.hex"
+#define ULINK_FIRMWARE_FILE      PKGDATADIR "/OpenULINK/ulink_firmware.hex"
 
 /** Maximum size of a single firmware section. Entire EZ-USB code space = 8kB */
 #define SECTION_BUFFERSIZE       8192
@@ -123,14 +123,14 @@ enum ulink_delay_type {
  * The last command sets #needs_postprocessing to true.
  */
 struct ulink_cmd {
-	uint8_t id;		/* /< ULINK command ID */
+	uint8_t id;			/**< ULINK command ID */
 
-	uint8_t *payload_out;	/* /< OUT direction payload data */
-	uint8_t payload_out_size;	/* /< OUT direction payload size for this command */
+	uint8_t *payload_out;		/**< OUT direction payload data */
+	uint8_t payload_out_size;	/**< OUT direction payload size for this command */
 
-	uint8_t *payload_in_start;	/* /< Pointer to first element of IN payload array */
-	uint8_t *payload_in;	/* /< Pointer where IN payload shall be stored */
-	uint8_t payload_in_size;/* /< IN direction payload size for this command */
+	uint8_t *payload_in_start;	/**< Pointer to first element of IN payload array */
+	uint8_t *payload_in;		/**< Pointer where IN payload shall be stored */
+	uint8_t payload_in_size;	/**< IN direction payload size for this command */
 
 	/** Indicates if this command needs post-processing */
 	bool needs_postprocessing;
@@ -141,23 +141,24 @@ struct ulink_cmd {
 	/** Pointer to corresponding OpenOCD command for post-processing */
 	struct jtag_command *cmd_origin;
 
-	struct ulink_cmd *next;	/* /< Pointer to next command (linked list) */
+	struct ulink_cmd *next;		/**< Pointer to next command (linked list) */
 };
 
 /** Describes one driver instance */
 struct ulink {
-	struct usb_dev_handle *usb_handle;
+	struct libusb_context *libusb_ctx;
+	struct libusb_device_handle *usb_device_handle;
 	enum ulink_type type;
 
-	int delay_scan_in;	/* /< Delay value for SCAN_IN commands */
-	int delay_scan_out;	/* /< Delay value for SCAN_OUT commands */
-	int delay_scan_io;	/* /< Delay value for SCAN_IO commands */
-	int delay_clock_tck;	/* /< Delay value for CLOCK_TMS commands */
-	int delay_clock_tms;	/* /< Delay value for CLOCK_TCK commands */
+	int delay_scan_in;	/**< Delay value for SCAN_IN commands */
+	int delay_scan_out;	/**< Delay value for SCAN_OUT commands */
+	int delay_scan_io;	/**< Delay value for SCAN_IO commands */
+	int delay_clock_tck;	/**< Delay value for CLOCK_TMS commands */
+	int delay_clock_tms;	/**< Delay value for CLOCK_TCK commands */
 
-	int commands_in_queue;	/* /< Number of commands in queue */
-	struct ulink_cmd *queue_start;	/* /< Pointer to first command in queue */
-	struct ulink_cmd *queue_end;	/* /< Pointer to last command in queue */
+	int commands_in_queue;		/**< Number of commands in queue */
+	struct ulink_cmd *queue_start;	/**< Pointer to first command in queue */
+	struct ulink_cmd *queue_end;	/**< Pointer to last command in queue */
 };
 
 /**************************** Function Prototypes *****************************/
@@ -167,10 +168,10 @@ int ulink_usb_open(struct ulink **device);
 int ulink_usb_close(struct ulink **device);
 
 /* ULINK MCU (Cypress EZ-USB) specific functions */
-int ulink_cpu_reset(struct ulink *device, char reset_bit);
-int ulink_load_firmware_and_renumerate(struct ulink **device, char *filename,
+int ulink_cpu_reset(struct ulink *device, unsigned char reset_bit);
+int ulink_load_firmware_and_renumerate(struct ulink **device, const char *filename,
 		uint32_t delay);
-int ulink_load_firmware(struct ulink *device, char *filename);
+int ulink_load_firmware(struct ulink *device, const char *filename);
 int ulink_write_firmware_section(struct ulink *device,
 		struct image *firmware_image, int section_index);
 
@@ -258,30 +259,46 @@ struct ulink *ulink_handle;
 /**
  * Opens the ULINK device and claims its USB interface.
  *
+ * Currently, only the original ULINK is supported
+ *
  * @param device pointer to struct ulink identifying ULINK driver instance.
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
 int ulink_usb_open(struct ulink **device)
 {
-	int ret;
-	struct usb_dev_handle *usb_handle;
+	ssize_t num_devices, i;
+	bool found;
+	libusb_device **usb_devices;
+	struct libusb_device_descriptor usb_desc;
+	struct libusb_device_handle *usb_device_handle;
 
-	/* Currently, only original ULINK is supported */
-	uint16_t vids[] = { ULINK_VID, 0 };
-	uint16_t pids[] = { ULINK_PID, 0 };
+	num_devices = libusb_get_device_list((*device)->libusb_ctx, &usb_devices);
 
-	ret = jtag_usb_open(vids, pids, &usb_handle);
+	if (num_devices <= 0)
+		return ERROR_FAIL;
 
-	if (ret != ERROR_OK)
-		return ret;
+	found = false;
+	for (i = 0; i < num_devices; i++) {
+		if (libusb_get_device_descriptor(usb_devices[i], &usb_desc) != 0)
+			continue;
+		else if (usb_desc.idVendor == ULINK_VID && usb_desc.idProduct == ULINK_PID) {
+			found = true;
+			break;
+		}
+	}
 
-	ret = usb_claim_interface(usb_handle, 0);
+	if (!found)
+		return ERROR_FAIL;
 
-	if (ret != 0)
-		return ret;
+	if (libusb_open(usb_devices[i], &usb_device_handle) != 0)
+		return ERROR_FAIL;
+	libusb_free_device_list(usb_devices, 1);
 
-	(*device)->usb_handle = usb_handle;
+	if (libusb_claim_interface(usb_device_handle, 0) != 0)
+		return ERROR_FAIL;
+
+	(*device)->usb_device_handle = usb_device_handle;
 	(*device)->type = ULINK_1;
 
 	return ERROR_OK;
@@ -296,13 +313,12 @@ int ulink_usb_open(struct ulink **device)
  */
 int ulink_usb_close(struct ulink **device)
 {
-	if (usb_release_interface((*device)->usb_handle, 0) != 0)
+	if (libusb_release_interface((*device)->usb_device_handle, 0) != 0)
 		return ERROR_FAIL;
 
-	if (usb_close((*device)->usb_handle) != 0)
-		return ERROR_FAIL;
+	libusb_close((*device)->usb_device_handle);
 
-	(*device)->usb_handle = NULL;
+	(*device)->usb_device_handle = NULL;
 
 	return ERROR_OK;
 }
@@ -318,12 +334,12 @@ int ulink_usb_close(struct ulink **device)
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-int ulink_cpu_reset(struct ulink *device, char reset_bit)
+int ulink_cpu_reset(struct ulink *device, unsigned char reset_bit)
 {
 	int ret;
 
-	ret = usb_control_msg(device->usb_handle,
-			(USB_ENDPOINT_OUT | USB_TYPE_VENDOR | USB_RECIP_DEVICE),
+	ret = libusb_control_transfer(device->usb_device_handle,
+			(LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE),
 			REQUEST_FIRMWARE_LOAD, CPUCS_REG, 0, &reset_bit, 1, USB_TIMEOUT);
 
 	/* usb_control_msg() returns the number of bytes transferred during the
@@ -346,7 +362,7 @@ int ulink_cpu_reset(struct ulink *device, char reset_bit)
  * @return on failure: ERROR_FAIL
  */
 int ulink_load_firmware_and_renumerate(struct ulink **device,
-	char *filename, uint32_t delay)
+	const char *filename, uint32_t delay)
 {
 	int ret;
 
@@ -381,7 +397,7 @@ int ulink_load_firmware_and_renumerate(struct ulink **device,
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-int ulink_load_firmware(struct ulink *device, char *filename)
+int ulink_load_firmware(struct ulink *device, const char *filename)
 {
 	struct image ulink_firmware_image;
 	int ret, i;
@@ -467,9 +483,9 @@ int ulink_write_firmware_section(struct ulink *device,
 		else
 			chunk_size = bytes_remaining;
 
-		ret = usb_control_msg(device->usb_handle,
-				(USB_ENDPOINT_OUT | USB_TYPE_VENDOR | USB_RECIP_DEVICE),
-				REQUEST_FIRMWARE_LOAD, addr, FIRMWARE_ADDR, (char *)data_ptr,
+		ret = libusb_control_transfer(device->usb_device_handle,
+				(LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE),
+				REQUEST_FIRMWARE_LOAD, addr, FIRMWARE_ADDR, (unsigned char *)data_ptr,
 				chunk_size, USB_TIMEOUT);
 
 		if (ret != (int)chunk_size) {
@@ -501,8 +517,8 @@ void ulink_print_signal_states(uint8_t input_signals, uint8_t output_signals)
 		(input_signals  & SIGNAL_TDO   ? 1 : 0),
 		(output_signals & SIGNAL_TMS   ? 1 : 0),
 		(output_signals & SIGNAL_TCK   ? 1 : 0),
-		(output_signals & SIGNAL_TRST  ? 0 : 1),/* TRST and RESET are inverted */
-		(output_signals & SIGNAL_RESET ? 0 : 1));	/* by hardware */
+		(output_signals & SIGNAL_TRST  ? 0 : 1),	/* Inverted by hardware */
+		(output_signals & SIGNAL_RESET ? 0 : 1));	/* Inverted by hardware */
 }
 
 /**************** OpenULINK command generation helper functions ***************/
@@ -694,7 +710,7 @@ int ulink_append_queue(struct ulink *device, struct ulink_cmd *ulink_cmd)
 int ulink_execute_queued_commands(struct ulink *device, int timeout)
 {
 	struct ulink_cmd *current;
-	int ret, i, index_out, index_in, count_out, count_in;
+	int ret, i, index_out, index_in, count_out, count_in, transferred;
 	uint8_t buffer[64];
 
 #ifdef _DEBUG_JTAG_IO_
@@ -719,20 +735,20 @@ int ulink_execute_queued_commands(struct ulink *device, int timeout)
 	}
 
 	/* Send packet to ULINK */
-	ret = usb_bulk_write(device->usb_handle, (2 | USB_ENDPOINT_OUT),
-			(char *)buffer, count_out, timeout);
-	if (ret < 0)
+	ret = libusb_bulk_transfer(device->usb_device_handle, (2 | LIBUSB_ENDPOINT_OUT),
+			(unsigned char *)buffer, count_out, &transferred, timeout);
+	if (ret != 0)
 		return ERROR_FAIL;
-	if (ret != count_out)
+	if (transferred != count_out)
 		return ERROR_FAIL;
 
 	/* Wait for response if commands contain IN payload data */
 	if (count_in > 0) {
-		ret = usb_bulk_read(device->usb_handle, (2 | USB_ENDPOINT_IN),
-				(char *)buffer, 64, timeout);
-		if (ret < 0)
+		ret = libusb_bulk_transfer(device->usb_device_handle, (2 | LIBUSB_ENDPOINT_IN),
+				(unsigned char *)buffer, 64, &transferred, timeout);
+		if (ret != 0)
 			return ERROR_FAIL;
-		if (ret != count_in)
+		if (transferred != count_in)
 			return ERROR_FAIL;
 
 		/* Write back IN payload data */
@@ -2142,17 +2158,17 @@ static int ulink_speed_div(int speed, int *khz)
  */
 static int ulink_init(void)
 {
-	int ret;
+	int ret, transferred;
 	char str_manufacturer[20];
 	bool download_firmware = false;
-	uint8_t *dummy;
+	unsigned char *dummy;
 	uint8_t input_signals, output_signals;
 
 	ulink_handle = calloc(1, sizeof(struct ulink));
 	if (ulink_handle == NULL)
 		return ERROR_FAIL;
 
-	usb_init();
+	libusb_init(&ulink_handle->libusb_ctx);
 
 	ret = ulink_usb_open(&ulink_handle);
 	if (ret != ERROR_OK) {
@@ -2163,7 +2179,7 @@ static int ulink_init(void)
 	}
 
 	/* Get String Descriptor to determine if firmware needs to be loaded */
-	ret = usb_get_string_simple(ulink_handle->usb_handle, 1, str_manufacturer, 20);
+	ret = libusb_get_string_descriptor_ascii(ulink_handle->usb_device_handle, 1, (unsigned char *)str_manufacturer, 20);
 	if (ret < 0) {
 		/* Could not get descriptor -> Unconfigured or original Keil firmware */
 		download_firmware = true;
@@ -2202,12 +2218,12 @@ static int ulink_init(void)
 		 * shut down by the user via Ctrl-C. Try to retrieve this Bulk IN packet. */
 		dummy = calloc(64, sizeof(uint8_t));
 
-		ret = usb_bulk_read(ulink_handle->usb_handle, (2 | USB_ENDPOINT_IN),
-				(char *)dummy, 64, 200);
+		ret = libusb_bulk_transfer(ulink_handle->usb_device_handle, (2 | LIBUSB_ENDPOINT_IN),
+				dummy, 64, &transferred, 200);
 
 		free(dummy);
 
-		if (ret < 0) {
+		if (ret != 0 || transferred == 0) {
 			/* Bulk IN transfer failed -> unrecoverable error condition */
 			LOG_ERROR("Cannot communicate with ULINK device. Disconnect ULINK from "
 				"the USB port and re-connect, then re-run OpenOCD");
@@ -2268,7 +2284,7 @@ COMMAND_HANDLER(ulink_download_firmware_handler)
 	LOG_INFO("Downloading ULINK firmware image %s", CMD_ARGV[0]);
 
 	/* Download firmware image in CMD_ARGV[0] */
-	ret = ulink_load_firmware_and_renumerate(&ulink_handle, (char *)CMD_ARGV[0],
+	ret = ulink_load_firmware_and_renumerate(&ulink_handle, CMD_ARGV[0],
 			ULINK_RENUMERATION_DELAY);
 
 	return ret;

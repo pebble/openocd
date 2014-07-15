@@ -37,7 +37,7 @@
 
 #include <target/target.h>
 
-static struct hl_interface_s hl_if = { {0, 0, 0, 0, 0, HL_TRANSPORT_UNKNOWN, 0, false}, 0, 0 };
+static struct hl_interface_s hl_if = { {0, 0, 0, 0, 0, HL_TRANSPORT_UNKNOWN, false, NULL, 0}, 0, 0 };
 
 int hl_interface_open(enum hl_transports tr)
 {
@@ -72,7 +72,7 @@ int hl_interface_init_target(struct target *t)
 	 * can setup the private pointer in the tap structure
 	 * if the interface match the tap idcode
 	 */
-	res = hl_if.layout->api->idcode(hl_if.fd, &t->tap->idcode);
+	res = hl_if.layout->api->idcode(hl_if.handle, &t->tap->idcode);
 
 	if (res != ERROR_OK)
 		return res;
@@ -84,14 +84,15 @@ int hl_interface_init_target(struct target *t)
 		uint32_t expected = t->tap->expected_ids[ii];
 
 		/* treat "-expected-id 0" as a "don't-warn" wildcard */
-		if (!expected || (t->tap->idcode == expected)) {
+		if (!expected || !t->tap->idcode ||
+		    (t->tap->idcode == expected)) {
 			found = 1;
 			break;
 		}
 	}
 
 	if (found == 0) {
-		LOG_ERROR("hl_interface_init_target: target not found: idcode: 0x%08x",
+		LOG_ERROR("hl_interface_init_target: target not found: idcode: 0x%08" PRIx32,
 				t->tap->idcode);
 		return ERROR_FAIL;
 	}
@@ -114,6 +115,12 @@ static int hl_interface_quit(void)
 {
 	LOG_DEBUG("hl_interface_quit");
 
+	if (hl_if.param.trace_f) {
+		fclose(hl_if.param.trace_f);
+		hl_if.param.trace_f = NULL;
+	}
+	hl_if.param.trace_source_hz = 0;
+
 	return ERROR_OK;
 }
 
@@ -130,7 +137,9 @@ int hl_interface_init_reset(void)
 	 * we will attempt it again */
 	if (hl_if.param.connect_under_reset) {
 		jtag_add_reset(0, 1);
-		hl_if.layout->api->assert_srst(hl_if.fd, 0);
+		hl_if.layout->api->assert_srst(hl_if.handle, 0);
+	} else {
+		jtag_add_reset(0, 0);
 	}
 
 	return ERROR_OK;
@@ -205,17 +214,27 @@ COMMAND_HANDLER(hl_interface_handle_vid_pid_command)
 	return ERROR_OK;
 }
 
-COMMAND_HANDLER(stlink_interface_handle_api_command)
+COMMAND_HANDLER(interface_handle_trace_command)
 {
-	if (CMD_ARGC != 1)
+	FILE *f = NULL;
+	unsigned source_hz;
+
+	if ((CMD_ARGC < 1) || (CMD_ARGC > 2))
 		return ERROR_COMMAND_SYNTAX_ERROR;
 
-	unsigned new_api;
-	COMMAND_PARSE_NUMBER(uint, CMD_ARGV[0], new_api);
-	if ((new_api == 0) || (new_api > 2))
+	COMMAND_PARSE_NUMBER(uint, CMD_ARGV[0], source_hz);
+	if (source_hz == 0) {
 		return ERROR_COMMAND_SYNTAX_ERROR;
+	}
 
-	hl_if.param.api = new_api;
+	if (CMD_ARGC == 2) {
+		f = fopen(CMD_ARGV[1], "a");
+		if (!f)
+			return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+
+	hl_if.param.trace_f = f;
+	hl_if.param.trace_source_hz = source_hz;
 
 	return ERROR_OK;
 }
@@ -250,11 +269,11 @@ static const struct command_registration hl_interface_command_handlers[] = {
 	 .usage = "(vid pid)* ",
 	 },
 	 {
-	 .name = "stlink_api",
-	 .handler = &stlink_interface_handle_api_command,
+	 .name = "trace",
+	 .handler = &interface_handle_trace_command,
 	 .mode = COMMAND_CONFIG,
-	 .help = "set the desired stlink api level",
-	 .usage = "api version 1 or 2",
+	 .help = "configure trace reception",
+	 .usage = "source_lock_hz [destination_path]",
 	 },
 	COMMAND_REGISTRATION_DONE
 };

@@ -73,6 +73,11 @@
 /* at91sam3s series (has always one flash bank) */
 #define FLASH_BANK_BASE_S   0x00400000
 
+/* at91sam3sd series (has always two flash banks) */
+#define FLASH_BANK0_BASE_SD FLASH_BANK_BASE_S
+#define FLASH_BANK1_BASE_512K_SD (FLASH_BANK0_BASE_SD+(512*1024/2))
+
+
 /* at91sam3n series (has always one flash bank) */
 #define FLASH_BANK_BASE_N   0x00400000
 
@@ -81,9 +86,6 @@
 /*Bank 1 of the at91sam3a/x series starts at 0x00080000 + half flash size*/
 #define	FLASH_BANK1_BASE_256K_AX	0x000A0000
 #define	FLASH_BANK1_BASE_512K_AX	0x000C0000
-
-#define FLASH_BANK0_BASE_SD FLASH_BANK_BASE_S
-#define FLASH_BANK1_BASE_512K_SD (FLASH_BANK0_BASE_SD+(512*1024/2))
 
 #define         AT91C_EFC_FCMD_GETD                 (0x0)	/* (EFC) Get Flash Descriptor */
 #define         AT91C_EFC_FCMD_WP                   (0x1)	/* (EFC) Write Page */
@@ -567,7 +569,7 @@ static const struct sam3_chip_details all_sam3_details[] = {
 
 	/* Note: The preliminary at91sam3s datasheet says on page 302 */
 	/* that the flash controller is at address 0x400E0800. */
-	/* This is _not_ the case, the controller resides at address 0x400e0a0. */
+	/* This is _not_ the case, the controller resides at address 0x400e0a00. */
 	{
 		.chipid_cidr    = 0x28A00960,
 		.name           = "at91sam3s4c",
@@ -730,6 +732,86 @@ static const struct sam3_chip_details all_sam3_details[] = {
 		},
 	},
 	{
+		.chipid_cidr    = 0x298B0A60,
+		.name           = "at91sam3sd8a",
+		.total_flash_size     = 512 * 1024,
+		.total_sram_size      = 64 * 1024,
+		.n_gpnvms       = 3,
+		.n_banks        = 2,
+		{
+/*			.bank[0] = { */
+			{
+				.probed = 0,
+				.pChip  = NULL,
+				.pBank  = NULL,
+				.bank_number = 0,
+				.base_address = FLASH_BANK0_BASE_SD,
+				.controller_address = 0x400e0a00,
+				.flash_wait_states = 6,	/* workaround silicon bug */
+				.present = 1,
+				.size_bytes =  256 * 1024,
+				.nsectors   =  16,
+				.sector_size = 32768,
+				.page_size   = 256,
+			  },
+/*			.bank[1] = { */
+			  {
+				.probed = 0,
+				.pChip  = NULL,
+				.pBank  = NULL,
+				.bank_number = 1,
+				.base_address = FLASH_BANK1_BASE_512K_SD,
+				.controller_address = 0x400e0a00,
+				.flash_wait_states = 6,	/* workaround silicon bug */
+				.present = 1,
+				.size_bytes =  256 * 1024,
+				.nsectors   =  16,
+				.sector_size = 32768,
+				.page_size   = 256,
+			},
+		},
+	},
+	{
+		.chipid_cidr    = 0x299B0A60,
+		.name           = "at91sam3sd8b",
+		.total_flash_size     = 512 * 1024,
+		.total_sram_size      = 64 * 1024,
+		.n_gpnvms       = 3,
+		.n_banks        = 2,
+		{
+/*			.bank[0] = { */
+			{
+				.probed = 0,
+				.pChip  = NULL,
+				.pBank  = NULL,
+				.bank_number = 0,
+				.base_address = FLASH_BANK0_BASE_SD,
+				.controller_address = 0x400e0a00,
+				.flash_wait_states = 6,	/* workaround silicon bug */
+				.present = 1,
+				.size_bytes =  256 * 1024,
+				.nsectors   =  16,
+				.sector_size = 32768,
+				.page_size   = 256,
+			  },
+/*			.bank[1] = { */
+			  {
+				.probed = 0,
+				.pChip  = NULL,
+				.pBank  = NULL,
+				.bank_number = 1,
+				.base_address = FLASH_BANK1_BASE_512K_SD,
+				.controller_address = 0x400e0a00,
+				.flash_wait_states = 6,	/* workaround silicon bug */
+				.present = 1,
+				.size_bytes =  256 * 1024,
+				.nsectors   =  16,
+				.sector_size = 32768,
+				.page_size   = 256,
+			},
+		},
+	},
+	{
 		.chipid_cidr    = 0x29ab0a60,
 		.name           = "at91sam3sd8c",
 		.total_flash_size     = 512 * 1024,
@@ -749,7 +831,7 @@ static const struct sam3_chip_details all_sam3_details[] = {
 				.present = 1,
 				.size_bytes =  256 * 1024,
 				.nsectors   =  16,
-				.sector_size = 16384,
+				.sector_size = 32768,
 				.page_size   = 256,
 			  },
 /*			.bank[1] = { */
@@ -764,7 +846,7 @@ static const struct sam3_chip_details all_sam3_details[] = {
 				.present = 1,
 				.size_bytes =  256 * 1024,
 				.nsectors   =  16,
-				.sector_size = 16384,
+				.sector_size = 32768,
 				.page_size   = 256,
 			},
 		},
@@ -886,6 +968,102 @@ static const struct sam3_chip_details all_sam3_details[] = {
 				.size_bytes = 64 * 1024,
 				.nsectors   = 4,
 				.sector_size = 16384,
+				.page_size   = 256,
+			},
+/*		.bank[1] = { */
+			{
+				.present = 0,
+				.probed = 0,
+				.bank_number = 1,
+
+			},
+		},
+	},
+	{
+		.chipid_cidr    = 0x288B0A60,
+		.name           = "at91sam3s8a",
+		.total_flash_size     = 256 * 2048,
+		.total_sram_size      = 64 * 1024,
+		.n_gpnvms       = 2,
+		.n_banks        = 1,
+		{
+/*		.bank[0] = { */
+			{
+				.probed = 0,
+				.pChip  = NULL,
+				.pBank  = NULL,
+				.bank_number = 0,
+				.base_address = FLASH_BANK_BASE_S,
+				.controller_address = 0x400e0a00,
+				.flash_wait_states = 6,	/* workaround silicon bug */
+				.present = 1,
+				.size_bytes = 256 * 2048,
+				.nsectors   = 16,
+				.sector_size = 32768,
+				.page_size   = 256,
+			},
+/*		.bank[1] = { */
+			{
+				.present = 0,
+				.probed = 0,
+				.bank_number = 1,
+
+			},
+		},
+	},
+	{
+		.chipid_cidr    = 0x289B0A60,
+		.name           = "at91sam3s8b",
+		.total_flash_size     = 256 * 2048,
+		.total_sram_size      = 64 * 1024,
+		.n_gpnvms       = 2,
+		.n_banks        = 1,
+		{
+/*		.bank[0] = { */
+			{
+				.probed = 0,
+				.pChip  = NULL,
+				.pBank  = NULL,
+				.bank_number = 0,
+				.base_address = FLASH_BANK_BASE_S,
+				.controller_address = 0x400e0a00,
+				.flash_wait_states = 6,	/* workaround silicon bug */
+				.present = 1,
+				.size_bytes = 256 * 2048,
+				.nsectors   = 16,
+				.sector_size = 32768,
+				.page_size   = 256,
+			},
+/*		.bank[1] = { */
+			{
+				.present = 0,
+				.probed = 0,
+				.bank_number = 1,
+
+			},
+		},
+	},
+	{
+		.chipid_cidr    = 0x28AB0A60,
+		.name           = "at91sam3s8c",
+		.total_flash_size     = 256 * 2048,
+		.total_sram_size      = 64 * 1024,
+		.n_gpnvms       = 2,
+		.n_banks        = 1,
+		{
+/*		.bank[0] = { */
+			{
+				.probed = 0,
+				.pChip  = NULL,
+				.pBank  = NULL,
+				.bank_number = 0,
+				.base_address = FLASH_BANK_BASE_S,
+				.controller_address = 0x400e0a00,
+				.flash_wait_states = 6,	/* workaround silicon bug */
+				.present = 1,
+				.size_bytes = 256 * 2048,
+				.nsectors   = 16,
+				.sector_size = 32768,
 				.page_size   = 256,
 			},
 /*		.bank[1] = { */
@@ -1339,6 +1517,143 @@ static const struct sam3_chip_details all_sam3_details[] = {
 			},
 		},
 	},
+
+	{
+		.chipid_cidr    = 0x29480360,
+		.name           = "at91sam3n0b",
+		.total_flash_size     = 32 * 1024,
+		.total_sram_size      = 8 * 1024,
+		.n_gpnvms       = 3,
+		.n_banks        = 1,
+
+/*		.bank[0] = { */
+		{
+			{
+				.probed = 0,
+				.pChip  = NULL,
+				.pBank  = NULL,
+				.bank_number = 0,
+				.base_address = FLASH_BANK_BASE_N,
+				.controller_address = 0x400e0A00,
+				.flash_wait_states = 6,	/* workaround silicon bug */
+				.present = 1,
+				.size_bytes = 32 * 1024,
+				.nsectors   = 2,
+				.sector_size = 16384,
+				.page_size   = 256,
+			},
+
+/*		.bank[1] = { */
+			{
+				.present = 0,
+				.probed = 0,
+				.bank_number = 1,
+			},
+		},
+	},
+
+	{
+		.chipid_cidr    = 0x29380360,
+		.name           = "at91sam3n0a",
+		.total_flash_size     = 32 * 1024,
+		.total_sram_size      = 8 * 1024,
+		.n_gpnvms       = 3,
+		.n_banks        = 1,
+
+/*		.bank[0] = { */
+		{
+			{
+				.probed = 0,
+				.pChip  = NULL,
+				.pBank  = NULL,
+				.bank_number = 0,
+				.base_address = FLASH_BANK_BASE_N,
+				.controller_address = 0x400e0A00,
+				.flash_wait_states = 6,	/* workaround silicon bug */
+				.present = 1,
+				.size_bytes = 32 * 1024,
+				.nsectors   = 2,
+				.sector_size = 16384,
+				.page_size   = 256,
+			},
+
+/*		.bank[1] = { */
+			{
+				.present = 0,
+				.probed = 0,
+				.bank_number = 1,
+			},
+		},
+	},
+
+	{
+		.chipid_cidr    = 0x29450260,
+		.name           = "at91sam3n00b",
+		.total_flash_size     = 16 * 1024,
+		.total_sram_size      = 4 * 1024,
+		.n_gpnvms       = 3,
+		.n_banks        = 1,
+
+/*		.bank[0] = { */
+		{
+			{
+				.probed = 0,
+				.pChip  = NULL,
+				.pBank  = NULL,
+				.bank_number = 0,
+				.base_address = FLASH_BANK_BASE_N,
+				.controller_address = 0x400e0A00,
+				.flash_wait_states = 6,	/* workaround silicon bug */
+				.present = 1,
+				.size_bytes = 16 * 1024,
+				.nsectors   = 1,
+				.sector_size = 16384,
+				.page_size   = 256,
+			},
+
+/*		.bank[1] = { */
+			{
+				.present = 0,
+				.probed = 0,
+				.bank_number = 1,
+			},
+		},
+	},
+
+	{
+		.chipid_cidr    = 0x29350260,
+		.name           = "at91sam3n00a",
+		.total_flash_size     = 16 * 1024,
+		.total_sram_size      = 4 * 1024,
+		.n_gpnvms       = 3,
+		.n_banks        = 1,
+
+/*		.bank[0] = { */
+		{
+			{
+				.probed = 0,
+				.pChip  = NULL,
+				.pBank  = NULL,
+				.bank_number = 0,
+				.base_address = FLASH_BANK_BASE_N,
+				.controller_address = 0x400e0A00,
+				.flash_wait_states = 6,	/* workaround silicon bug */
+				.present = 1,
+				.size_bytes = 16 * 1024,
+				.nsectors   = 1,
+				.sector_size = 16384,
+				.page_size   = 256,
+			},
+
+/*		.bank[1] = { */
+			{
+				.present = 0,
+				.probed = 0,
+				.bank_number = 1,
+			},
+		},
+	},
+
 
 	/* Start at91sam3a series*/
 	/* System boots at address 0x0 */
@@ -2155,7 +2470,7 @@ static uint32_t sam3_reg_fieldname(struct sam3_chip *pChip,
 	}
 
 	/* show the basics */
-	LOG_USER_N("\t%*s: %*d [0x%0*x] ",
+	LOG_USER_N("\t%*s: %*" PRIu32 " [0x%0*" PRIx32 "] ",
 		REG_NAME_WIDTH, regname,
 		dwidth, v,
 		hwidth, v);
@@ -2380,10 +2695,10 @@ static void sam3_explain_ckgr_mcfr(struct sam3_chip *pChip)
 	v = (v * pChip->cfg.slow_freq) / 16;
 	pChip->cfg.mainosc_freq = v;
 
-	LOG_USER("(%3.03f Mhz (%d.%03dkhz slowclk)",
+	LOG_USER("(%3.03f Mhz (%" PRIu32 ".%03" PRIu32 "khz slowclk)",
 		_tomhz(v),
-		pChip->cfg.slow_freq / 1000,
-		pChip->cfg.slow_freq % 1000);
+		(uint32_t)(pChip->cfg.slow_freq / 1000),
+		(uint32_t)(pChip->cfg.slow_freq % 1000));
 }
 
 static void sam3_explain_ckgr_plla(struct sam3_chip *pChip)
@@ -2553,7 +2868,7 @@ static const struct sam3_reg_list sam3_all_regs[] = {
 
 static struct sam3_bank_private *get_sam3_bank_private(struct flash_bank *bank)
 {
-	return (struct sam3_bank_private *)(bank->driver_priv);
+	return bank->driver_priv;
 }
 
 /**
@@ -2653,7 +2968,7 @@ static int sam3_GetInfo(struct sam3_chip *pChip)
 		/* display all regs */
 		LOG_DEBUG("Start: %s", pReg->name);
 		regval = *sam3_get_reg_ptr(&(pChip->cfg), pReg);
-		LOG_USER("%*s: [0x%08x] -> 0x%08x",
+		LOG_USER("%*s: [0x%08" PRIx32 "] -> 0x%08" PRIx32,
 			REG_NAME_WIDTH,
 			pReg->name,
 			pReg->address,
@@ -2669,7 +2984,7 @@ static int sam3_GetInfo(struct sam3_chip *pChip)
 	LOG_USER(" cpu-freq: %3.03f MHz", _tomhz(pChip->cfg.cpu_freq));
 	LOG_USER("mclk-freq: %3.03f MHz", _tomhz(pChip->cfg.mclk_freq));
 
-	LOG_USER(" UniqueId: 0x%08x 0x%08x 0x%08x 0x%08x",
+	LOG_USER(" UniqueId: 0x%08" PRIx32 " 0x%08" PRIx32 " 0x%08" PRIx32 " 0x%08" PRIx32,
 		pChip->cfg.unique_id[0],
 		pChip->cfg.unique_id[1],
 		pChip->cfg.unique_id[2],
@@ -2815,7 +3130,7 @@ static int sam3_GetDetails(struct sam3_bank_private *pPrivate)
 	pDetails = all_sam3_details;
 	while (pDetails->name) {
 		/* Compare cidr without version bits */
-		if (pDetails->chipid_cidr == (pPrivate->pChip->cfg.CHIPID_CIDR & 0xFFFFFFE0))
+		if (((pDetails->chipid_cidr ^ pPrivate->pChip->cfg.CHIPID_CIDR) & 0xFFFFFFE0) == 0)
 			break;
 		else
 			pDetails++;
@@ -2824,7 +3139,7 @@ static int sam3_GetDetails(struct sam3_bank_private *pPrivate)
 		LOG_ERROR("SAM3 ChipID 0x%08x not found in table (perhaps you can ID this chip?)",
 			(unsigned int)(pPrivate->pChip->cfg.CHIPID_CIDR));
 		/* Help the victim, print details about the chip */
-		LOG_INFO("SAM3 CHIPID_CIDR: 0x%08x decodes as follows",
+		LOG_INFO("SAM3 CHIPID_CIDR: 0x%08" PRIx32 " decodes as follows",
 			pPrivate->pChip->cfg.CHIPID_CIDR);
 		sam3_explain_chipid_cidr(pPrivate->pChip);
 		return ERROR_FAIL;
@@ -3001,16 +3316,6 @@ static int sam3_protect(struct flash_bank *bank, int set, int first, int last)
 
 }
 
-static int sam3_info(struct flash_bank *bank, char *buf, int buf_size)
-{
-	if (bank->target->state != TARGET_HALTED) {
-		LOG_ERROR("Target not halted");
-		return ERROR_TARGET_NOT_HALTED;
-	}
-	buf[0] = 0;
-	return ERROR_OK;
-}
-
 static int sam3_page_read(struct sam3_bank_private *pPrivate, unsigned pagenum, uint8_t *buf)
 {
 	uint32_t adr;
@@ -3030,94 +3335,7 @@ static int sam3_page_read(struct sam3_bank_private *pPrivate, unsigned pagenum, 
 	return r;
 }
 
-/* The code below is basically this: */
-/* compiled with */
-/* arm-none-eabi-gcc -mthumb -mcpu = cortex-m3 -O9 -S ./foobar.c -o foobar.s */
-/*  */
-/* Only the *CPU* can write to the flash buffer. */
-/* the DAP cannot... so - we download this 28byte thing */
-/* Run the algorithm - (below) */
-/* to program the device */
-/*  */
-/* ======================================== */
-/* #include <stdint.h> */
-/*  */
-/* struct foo { */
-/*   uint32_t *dst; */
-/*   const uint32_t *src; */
-/*   int   n; */
-/*   volatile uint32_t *base; */
-/*   uint32_t   cmd; */
-/* }; */
-/*  */
-/*  */
-/* uint32_t sam3_function(struct foo *p) */
-/* { */
-/*   volatile uint32_t *v; */
-/*   uint32_t *d; */
-/*   const uint32_t *s; */
-/*   int   n; */
-/*   uint32_t r; */
-/*  */
-/*   d = p->dst; */
-/*   s = p->src; */
-/*   n = p->n; */
-/*  */
-/*   do { */
-/*     *d++ = *s++; */
-/*   } while (--n) */
-/*     ; */
-/*  */
-/*   v = p->base; */
-/*  */
-/*   v[ 1 ] = p->cmd; */
-/*   do { */
-/*     r = v[8/4]; */
-/*   } while (!(r&1)) */
-/*     ; */
-/*   return r; */
-/* } */
-/* ======================================== */
-
-static const uint8_t
-	sam3_page_write_opcodes[] = {
-	/*  24 0000 0446                mov	r4, r0 */
-	0x04, 0x46,
-	/*  25 0002 6168                ldr	r1, [r4, #4] */
-	0x61, 0x68,
-	/*  26 0004 0068                ldr	r0, [r0, #0] */
-	0x00, 0x68,
-	/*  27 0006 A268                ldr	r2, [r4, #8] */
-	0xa2, 0x68,
-	/*  28                          @ lr needed for prologue */
-	/*  29                  .L2: */
-	/*  30 0008 51F8043B            ldr	r3, [r1], #4 */
-	0x51, 0xf8, 0x04, 0x3b,
-	/*  31 000c 12F1FF32            adds	r2, r2, #-1 */
-	0x12, 0xf1, 0xff, 0x32,
-	/*  32 0010 40F8043B            str	r3, [r0], #4 */
-	0x40, 0xf8, 0x04, 0x3b,
-	/*  33 0014 F8D1                bne	.L2 */
-	0xf8, 0xd1,
-	/*  34 0016 E268                ldr	r2, [r4, #12] */
-	0xe2, 0x68,
-	/*  35 0018 2369                ldr	r3, [r4, #16] */
-	0x23, 0x69,
-	/*  36 001a 5360                str	r3, [r2, #4] */
-	0x53, 0x60,
-	/*  37 001c 0832                adds	r2, r2, #8 */
-	0x08, 0x32,
-	/*  38                  .L4: */
-	/*  39 001e 1068                ldr	r0, [r2, #0] */
-	0x10, 0x68,
-	/*  40 0020 10F0010F            tst	r0, #1 */
-	0x10, 0xf0, 0x01, 0x0f,
-	/*  41 0024 FBD0                beq	.L4 */
-	0xfb, 0xd0,
-	0x00, 0xBE				/* bkpt #0 */
-};
-
-static int sam3_page_write(struct sam3_bank_private *pPrivate, unsigned pagenum, uint8_t *buf)
+static int sam3_page_write(struct sam3_bank_private *pPrivate, unsigned pagenum, const uint8_t *buf)
 {
 	uint32_t adr;
 	uint32_t status;
@@ -3176,7 +3394,7 @@ static int sam3_page_write(struct sam3_bank_private *pPrivate, unsigned pagenum,
 }
 
 static int sam3_write(struct flash_bank *bank,
-	uint8_t *buffer,
+	const uint8_t *buffer,
 	uint32_t offset,
 	uint32_t count)
 {
@@ -3555,5 +3773,4 @@ struct flash_driver at91sam3_flash = {
 	.auto_probe = sam3_auto_probe,
 	.erase_check = sam3_erase_check,
 	.protect_check = sam3_protect_check,
-	.info = sam3_info,
 };

@@ -55,7 +55,7 @@ static int nds32_v3_activate_hardware_breakpoint(struct target *target)
 				/* enable breakpoint (physical address) */
 				aice_write_debug_reg(aice, NDS_EDM_SR_BPC0 + hbr_index, 0xA);
 
-			LOG_DEBUG("Add hardware BP %d at %08" PRIx32, hbr_index,
+			LOG_DEBUG("Add hardware BP %" PRId32 " at %08" PRIx32, hbr_index,
 					bp->address);
 		} else {
 			return ERROR_FAIL;
@@ -83,7 +83,7 @@ static int nds32_v3_deactivate_hardware_breakpoint(struct target *target)
 			return ERROR_FAIL;
 		}
 
-		LOG_DEBUG("Remove hardware BP %d at %08" PRIx32, hbr_index,
+		LOG_DEBUG("Remove hardware BP %" PRId32 " at %08" PRIx32, hbr_index,
 				bp->address);
 	}
 
@@ -130,7 +130,7 @@ static int nds32_v3_activate_hardware_watchpoint(struct target *target)
 			/* set value */
 			aice_write_debug_reg(aice, NDS_EDM_SR_BPV0 + wp_num, 0);
 
-			LOG_DEBUG("Add hardware wathcpoint %d at %08" PRIx32 " mask %08" PRIx32,
+			LOG_DEBUG("Add hardware wathcpoint %" PRId32 " at %08" PRIx32 " mask %08" PRIx32,
 					wp_num, wp->address, wp->mask);
 
 			wp_num++;
@@ -171,7 +171,7 @@ static int nds32_v3_deactivate_hardware_watchpoint(struct target *target)
 			/* disable watchpoint */
 			aice_write_debug_reg(aice, NDS_EDM_SR_BPC0 + wp_num, 0x0);
 
-			LOG_DEBUG("Remove hardware wathcpoint %d at %08" PRIx32
+			LOG_DEBUG("Remove hardware wathcpoint %" PRId32 " at %08" PRIx32
 					" mask %08" PRIx32, wp_num,
 					wp->address, wp->mask);
 			wp_num++;
@@ -200,7 +200,7 @@ static int nds32_v3_check_interrupt_stack(struct nds32 *nds32)
 	nds32->current_interrupt_level = (val_ir0 >> 1) & 0x3;
 
 	if (nds32_reach_max_interrupt_level(nds32))
-		LOG_ERROR("<-- TARGET ERROR! Reaching the max interrupt stack level %d. -->",
+		LOG_ERROR("<-- TARGET ERROR! Reaching the max interrupt stack level %" PRIu32 ". -->",
 				nds32->current_interrupt_level);
 
 	/* backup $ir4 & $ir6 to avoid suppressed exception overwrite */
@@ -254,12 +254,8 @@ static int nds32_v3_deassert_reset(struct target *target)
 		if (retval != ERROR_OK)
 			return retval;
 
-		/* call target_poll() to avoid "Halt timed out" */
-		CHECK_RETVAL(target_poll(target));
 	} else {
 		/* reset-halt */
-		jtag_poll_set_enabled(false);
-
 		struct nds32_v3_common *nds32_v3 = target_to_nds32_v3(target);
 		struct nds32 *nds32 = &(nds32_v3->nds32);
 		uint32_t value;
@@ -299,11 +295,11 @@ static int nds32_v3_add_breakpoint(struct target *target,
 			LOG_WARNING("<-- TARGET WARNING! Insert too many "
 					"hardware breakpoints/watchpoints! "
 					"The limit of combined hardware "
-					"breakpoints/watchpoints is %d. -->",
+					"breakpoints/watchpoints is %" PRId32 ". -->",
 					nds32_v3->n_hbr);
 			LOG_WARNING("<-- TARGET STATUS: Inserted number of "
-					"hardware breakpoint: %d, hardware "
-					"watchpoints: %d. -->",
+					"hardware breakpoint: %" PRId32 ", hardware "
+					"watchpoints: %" PRId32 ". -->",
 					nds32_v3->next_hbr_index - nds32_v3->used_n_wp,
 					nds32_v3->used_n_wp);
 			return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
@@ -373,11 +369,11 @@ static int nds32_v3_add_watchpoint(struct target *target,
 
 		LOG_WARNING("<-- TARGET WARNING! Insert too many hardware "
 				"breakpoints/watchpoints! The limit of combined "
-				"hardware breakpoints/watchpoints is %d. -->",
+				"hardware breakpoints/watchpoints is %" PRId32 ". -->",
 				nds32_v3->n_hbr);
 		LOG_WARNING("<-- TARGET STATUS: Inserted number of "
-				"hardware breakpoint: %d, hardware "
-				"watchpoints: %d. -->",
+				"hardware breakpoint: %" PRId32 ", hardware "
+				"watchpoints: %" PRId32 ". -->",
 				nds32_v3->next_hbr_index - nds32_v3->used_n_wp,
 				nds32_v3->used_n_wp);
 
@@ -462,7 +458,7 @@ static int nds32_v3_examine(struct target *target)
 	nds32_v3->next_hbr_index = 0;
 	nds32_v3->used_n_wp = 0;
 
-	LOG_INFO("%s: total hardware breakpoint %d", target_name(target),
+	LOG_INFO("%s: total hardware breakpoint %" PRId32, target_name(target),
 			nds32_v3->n_hbr);
 
 	nds32->target->state = TARGET_RUNNING;
@@ -488,7 +484,6 @@ struct target_type nds32_v3_target = {
 
 	.assert_reset = nds32_assert_reset,
 	.deassert_reset = nds32_v3_deassert_reset,
-	.soft_reset_halt = nds32_v3_soft_reset_halt,
 
 	/* register access */
 	.get_gdb_reg_list = nds32_get_gdb_reg_list,
@@ -506,6 +501,7 @@ struct target_type nds32_v3_target = {
 	.remove_breakpoint = nds32_v3_remove_breakpoint,
 	.add_watchpoint = nds32_v3_add_watchpoint,
 	.remove_watchpoint = nds32_v3_remove_watchpoint,
+	.hit_watchpoint = nds32_v3_hit_watchpoint,
 
 	/* MMU */
 	.mmu = nds32_mmu,
@@ -519,4 +515,9 @@ struct target_type nds32_v3_target = {
 	.target_create = nds32_v3_target_create,
 	.init_target = nds32_v3_init_target,
 	.examine = nds32_v3_examine,
+
+	.get_gdb_fileio_info = nds32_get_gdb_fileio_info,
+	.gdb_fileio_end = nds32_gdb_fileio_end,
+
+	.profiling = nds32_profiling,
 };

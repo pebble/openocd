@@ -110,8 +110,8 @@ static int armv7a_read_ttbcr(struct target *target)
 		armv7a->armv7a_mmu.ttbr0_mask);
 #endif
 	if (armv7a->armv7a_mmu.ttbr1_used == 1) {
-		LOG_INFO("SVC access above %x",
-			(0xffffffff & armv7a->armv7a_mmu.ttbr0_mask));
+		LOG_INFO("SVC access above %" PRIx32,
+			 (uint32_t)(0xffffffff & armv7a->armv7a_mmu.ttbr0_mask));
 		armv7a->armv7a_mmu.os_border = 0xffffffff & armv7a->armv7a_mmu.ttbr0_mask;
 	} else {
 		/*  fix me , default is hard coded LINUX border  */
@@ -257,7 +257,7 @@ int armv7a_mmu_translate_va_pa(struct target *target, uint32_t va,
 	if (*val == va)
 		LOG_WARNING("virt = phys  : MMU disable !!");
 	if (meminfo) {
-		LOG_INFO("%x : %x %s outer shareable %s secured",
+		LOG_INFO("%" PRIx32 " : %" PRIx32 " %s outer shareable %s secured",
 			va, *val,
 			NOS == 1 ? "not" : " ",
 			NS == 1 ? "not" : "");
@@ -295,7 +295,7 @@ int armv7a_mmu_translate_va_pa(struct target *target, uint32_t va,
 				LOG_INFO("inner: Write-Back, no Write-Allocate");
 
 			default:
-				LOG_INFO("inner: %x ???", INNER);
+				LOG_INFO("inner: %" PRIx32 " ???", INNER);
 		}
 	}
 
@@ -314,14 +314,14 @@ static int armv7a_handle_inner_cache_info_command(struct command_context *cmd_ct
 	}
 
 	command_print(cmd_ctx,
-		"D-Cache: linelen %i, associativity %i, nsets %i, cachesize %d KBytes",
+		"D-Cache: linelen %" PRIi32 ", associativity %" PRIi32 ", nsets %" PRIi32 ", cachesize %" PRId32 " KBytes",
 		armv7a_cache->d_u_size.linelen,
 		armv7a_cache->d_u_size.associativity,
 		armv7a_cache->d_u_size.nsets,
 		armv7a_cache->d_u_size.cachesize);
 
 	command_print(cmd_ctx,
-		"I-Cache: linelen %i, associativity %i, nsets %i, cachesize %d KBytes",
+		"I-Cache: linelen %" PRIi32 ", associativity %" PRIi32 ", nsets %" PRIi32 ", cachesize %" PRId32 " KBytes",
 		armv7a_cache->i_size.linelen,
 		armv7a_cache->i_size.associativity,
 		armv7a_cache->i_size.nsets,
@@ -388,7 +388,7 @@ static int  armv7a_flush_all_data(struct target *target)
 		while (head != (struct target_list *)NULL) {
 			curr = head->target;
 			if (curr->state == TARGET_HALTED) {
-				LOG_INFO("Wait flushing data l1 on core %d", curr->coreid);
+				LOG_INFO("Wait flushing data l1 on core %" PRId32, curr->coreid);
 				retval = _armv7a_flush_all_data(curr);
 			}
 			head = head->next;
@@ -434,19 +434,19 @@ static int armv7a_handle_l2x_cache_info_command(struct command_context *cmd_ctx,
 	}
 
 	command_print(cmd_ctx,
-		"L1 D-Cache: linelen %i, associativity %i, nsets %i, cachesize %d KBytes",
+		"L1 D-Cache: linelen %" PRIi32 ", associativity %" PRIi32 ", nsets %" PRIi32 ", cachesize %" PRId32 " KBytes",
 		armv7a_cache->d_u_size.linelen,
 		armv7a_cache->d_u_size.associativity,
 		armv7a_cache->d_u_size.nsets,
 		armv7a_cache->d_u_size.cachesize);
 
 	command_print(cmd_ctx,
-		"L1 I-Cache: linelen %i, associativity %i, nsets %i, cachesize %d KBytes",
+		"L1 I-Cache: linelen %" PRIi32 ", associativity %" PRIi32 ", nsets %" PRIi32 ", cachesize %" PRId32 " KBytes",
 		armv7a_cache->i_size.linelen,
 		armv7a_cache->i_size.associativity,
 		armv7a_cache->i_size.nsets,
 		armv7a_cache->i_size.cachesize);
-	command_print(cmd_ctx, "L2 unified cache Base Address 0x%x, %d ways",
+	command_print(cmd_ctx, "L2 unified cache Base Address 0x%" PRIx32 ", %" PRId32 " ways",
 		l2x_cache->base, l2x_cache->way);
 
 
@@ -468,7 +468,7 @@ static int armv7a_l2x_cache_init(struct target *target, uint32_t base, uint32_t 
 	l2x_cache->base,l2x_cache->way);*/
 	if (armv7a->armv7a_mmu.armv7a_cache.l2_cache)
 		LOG_INFO("cache l2 already initialized\n");
-	armv7a->armv7a_mmu.armv7a_cache.l2_cache = (void *) l2x_cache;
+	armv7a->armv7a_mmu.armv7a_cache.l2_cache = l2x_cache;
 	/*  initialize l1 / l2x cache function  */
 	armv7a->armv7a_mmu.armv7a_cache.flush_all_data_cache
 		= armv7a_l2x_flush_all_data;
@@ -482,7 +482,7 @@ static int armv7a_l2x_cache_init(struct target *target, uint32_t base, uint32_t 
 			armv7a = target_to_armv7a(curr);
 			if (armv7a->armv7a_mmu.armv7a_cache.l2_cache)
 				LOG_ERROR("smp target : cache l2 already initialized\n");
-			armv7a->armv7a_mmu.armv7a_cache.l2_cache = (void *) l2x_cache;
+			armv7a->armv7a_mmu.armv7a_cache.l2_cache = l2x_cache;
 			armv7a->armv7a_mmu.armv7a_cache.flush_all_data_cache =
 				armv7a_l2x_flush_all_data;
 			armv7a->armv7a_mmu.armv7a_cache.display_cache_info =
@@ -545,6 +545,16 @@ static int armv7a_read_mpidr(struct target *target)
 			&mpidr);
 	if (retval != ERROR_OK)
 		goto done;
+
+	/* ARMv7R uses a different format for MPIDR.
+	 * When configured uniprocessor (most R cores) it reads as 0.
+	 * This will need to be implemented for multiprocessor ARMv7R cores. */
+	if (armv7a->is_armv7r) {
+		if (mpidr)
+			LOG_ERROR("MPIDR nonzero in ARMv7-R target");
+		goto done;
+	}
+
 	if (mpidr & 1<<31) {
 		armv7a->multi_processor_system = (mpidr >> 30) & 1;
 		armv7a->cluster_id = (mpidr >> 8) & 0xf;
@@ -555,7 +565,7 @@ static int armv7a_read_mpidr(struct target *target)
 			armv7a->multi_processor_system == 0 ? "multi core" : "mono core");
 
 	} else
-		LOG_ERROR("mpdir not in multiprocessor format");
+		LOG_ERROR("MPIDR not in multiprocessor format");
 
 done:
 	dpm->finish(dpm);
@@ -587,7 +597,7 @@ int armv7a_identify_cache(struct target *target)
 	if (retval != ERROR_OK)
 		goto done;
 	clidr = (clidr & 0x7000000) >> 23;
-	LOG_INFO("number of cache level %d", clidr / 2);
+	LOG_INFO("number of cache level %" PRIx32, (uint32_t)(clidr / 2));
 	if ((clidr / 2) > 1) {
 		/* FIXME not supported present in cortex A8 and later */
 		/*  in cortex A7, A15 */
@@ -785,7 +795,7 @@ const struct command_registration l2x_cache_command_handlers[] = {
 	{
 		.name = "cache_config",
 		.mode = COMMAND_EXEC,
-		.help = "cache configuation for a target",
+		.help = "cache configuration for a target",
 		.usage = "",
 		.chain = l2_cache_commands,
 	},

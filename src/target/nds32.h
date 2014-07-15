@@ -284,6 +284,20 @@ struct nds32 {
 	/** Flag reporting whether virtual hosting is active. */
 	bool virtual_hosting;
 
+	/** Flag reporting whether continue/step hits syscall or not */
+	bool hit_syscall;
+
+	/** Value to be returned by virtual hosting SYS_ERRNO request. */
+	int virtual_hosting_errno;
+
+	/** Flag reporting whether syscall is aborted */
+	bool virtual_hosting_ctrl_c;
+
+	/** Record syscall ID for other operations to do special processing for target */
+	int active_syscall_id;
+
+	struct breakpoint syscall_break;
+
 	/** Flag reporting whether global stop is active. */
 	bool global_stop;
 
@@ -296,6 +310,9 @@ struct nds32 {
 	/** backup/restore target EDM_CTL value. As debugging target debug
 	 * handler, it should be true. */
 	bool keep_target_edm_ctl;
+
+	/* Value of $EDM_CTL before target enters debug mode */
+	uint32_t backup_edm_ctl;
 
 	/** always use word-aligned address to access memory */
 	bool word_access_mem;
@@ -334,6 +351,9 @@ struct nds32 {
 	 *  hardware breakpoints or not in ROM */
 	bool auto_convert_hw_bp;
 
+	/* Flag to indicate the target is attached by debugger or not */
+	bool attached;
+
 	/** Backpointer to the target. */
 	struct target *target;
 
@@ -341,7 +361,7 @@ struct nds32 {
 };
 
 struct nds32_reg {
-	uint32_t num;
+	int32_t num;
 	uint32_t value;
 	uint64_t value_64;
 	struct target *target;
@@ -364,14 +384,13 @@ extern int nds32_remove_software_breakpoint(struct target *target,
 		struct breakpoint *breakpoint);
 
 extern int nds32_get_gdb_reg_list(struct target *target,
-		struct reg **reg_list[], int *reg_list_size);
+		struct reg **reg_list[], int *reg_list_size,
+		enum target_register_class reg_class);
 
 extern int nds32_write_buffer(struct target *target, uint32_t address,
 		uint32_t size, const uint8_t *buffer);
 extern int nds32_read_buffer(struct target *target, uint32_t address,
 		uint32_t size, uint8_t *buffer);
-extern int nds32_bulk_write_memory(struct target *target,
-		uint32_t address, uint32_t count, const uint8_t *buffer);
 extern int nds32_read_memory(struct target *target, uint32_t address,
 		uint32_t size, uint32_t count, uint8_t *buffer);
 extern int nds32_write_memory(struct target *target, uint32_t address,
@@ -403,8 +422,14 @@ extern int nds32_resume(struct target *target, int current,
 		uint32_t address, int handle_breakpoints, int debug_execution);
 extern int nds32_assert_reset(struct target *target);
 extern int nds32_init(struct nds32 *nds32);
+extern int nds32_get_gdb_fileio_info(struct target *target, struct gdb_fileio_info *fileio_info);
+extern int nds32_gdb_fileio_write_memory(struct nds32 *nds32, uint32_t address,
+		uint32_t size, const uint8_t *buffer);
+extern int nds32_gdb_fileio_end(struct target *target, int retcode, int fileio_errno, bool ctrl_c);
 extern int nds32_reset_halt(struct nds32 *nds32);
 extern int nds32_login(struct nds32 *nds32);
+extern int nds32_profiling(struct target *target, uint32_t *samples,
+			uint32_t max_num_samples, uint32_t *num_samples, uint32_t seconds);
 
 /** Convert target handle to generic Andes target state handle. */
 static inline struct nds32 *target_to_nds32(struct target *target)

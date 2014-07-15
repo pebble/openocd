@@ -48,7 +48,7 @@ static struct rtos_type *rtos_types[] = {
 	NULL
 };
 
-int rtos_thread_packet(struct connection *connection, char *packet, int packet_size);
+int rtos_thread_packet(struct connection *connection, const char *packet, int packet_size);
 
 int rtos_smp_init(struct target *target)
 {
@@ -140,7 +140,7 @@ int rtos_create(Jim_GetOptInfo *goi, struct target *target)
 	return JIM_ERR;
 }
 
-int gdb_thread_packet(struct connection *connection, char *packet, int packet_size)
+int gdb_thread_packet(struct connection *connection, char const *packet, int packet_size)
 {
 	struct target *target = get_target_from_connection(connection);
 	if (target->rtos == NULL)
@@ -188,7 +188,7 @@ static char *next_symbol(struct rtos *os, char *cur_symbol, uint64_t cur_addr)
  *
  * rtos_qsymbol() returns 1 if an RTOS has been detected, or 0 otherwise.
  */
-int rtos_qsymbol(struct connection *connection, char *packet, int packet_size)
+int rtos_qsymbol(struct connection *connection, char const *packet, int packet_size)
 {
 	int rtos_detected = 0;
 	uint64_t addr = 0;
@@ -214,8 +214,10 @@ int rtos_qsymbol(struct connection *connection, char *packet, int packet_size)
 			goto done;
 		} else {
 			/* Autodetecting RTOS - try next RTOS */
-			if (!rtos_try_next(target))
+			if (!rtos_try_next(target)) {
+				LOG_WARNING("No RTOS could be auto-detected!");
 				goto done;
+			}
 
 			/* Next RTOS selected - invalidate current symbol */
 			cur_sym[0] = '\x00';
@@ -254,7 +256,7 @@ done:
 	return rtos_detected;
 }
 
-int rtos_thread_packet(struct connection *connection, char *packet, int packet_size)
+int rtos_thread_packet(struct connection *connection, char const *packet, int packet_size)
 {
 	struct target *target = get_target_from_connection(connection);
 
@@ -289,7 +291,7 @@ int rtos_thread_packet(struct connection *connection, char *packet, int packet_s
 			if (detail->extra_info_str != NULL)
 				str_size += strlen(detail->extra_info_str);
 
-			char *tmp_str = (char *) malloc(str_size + 7);
+			char *tmp_str = malloc(str_size + 7);
 			char *tmp_str_ptr = tmp_str;
 
 			if (detail->display_str != NULL)
@@ -309,7 +311,7 @@ int rtos_thread_packet(struct connection *connection, char *packet, int packet_s
 			assert(strlen(tmp_str) ==
 				(size_t) (tmp_str_ptr - tmp_str));
 
-			char *hex_str = (char *) malloc(strlen(tmp_str) * 2 + 1);
+			char *hex_str = malloc(strlen(tmp_str) * 2 + 1);
 			int pkt_len = hexify(hex_str, tmp_str, 0, strlen(tmp_str) * 2 + 1);
 
 			gdb_put_packet(connection, hex_str, pkt_len);
@@ -329,21 +331,22 @@ int rtos_thread_packet(struct connection *connection, char *packet, int packet_s
 		return ERROR_OK;
 	} else if (strncmp(packet, "qfThreadInfo", 12) == 0) {
 		int i;
-		if ((target->rtos != NULL) && (target->rtos->thread_count != 0)) {
-
-			char *out_str = (char *) malloc(17 * target->rtos->thread_count + 5);
-			char *tmp_str = out_str;
-			tmp_str += sprintf(tmp_str, "m");
-			for (i = 0; i < target->rtos->thread_count; i++) {
-				if (i != 0)
-					tmp_str += sprintf(tmp_str, ",");
-				tmp_str += sprintf(tmp_str, "%016" PRIx64,
-						target->rtos->thread_details[i].threadid);
+		if (target->rtos != NULL) {
+			if (target->rtos->thread_count == 0) {
+				gdb_put_packet(connection, "l", 1);
+			} else {
+				/*thread id are 16 char +1 for ',' */
+				char *out_str = malloc(17 * target->rtos->thread_count + 1);
+				char *tmp_str = out_str;
+				for (i = 0; i < target->rtos->thread_count; i++) {
+					tmp_str += sprintf(tmp_str, "%c%016" PRIx64, i == 0 ? 'm' : ',',
+										target->rtos->thread_details[i].threadid);
+				}
+				gdb_put_packet(connection, out_str, strlen(out_str));
+				free(out_str);
 			}
-			tmp_str[0] = 0;
-			gdb_put_packet(connection, out_str, strlen(out_str));
 		} else
-			gdb_put_packet(connection, "", 0);
+			gdb_put_packet(connection, "l", 1);
 
 		return ERROR_OK;
 	} else if (strncmp(packet, "qsThreadInfo", 12) == 0) {
@@ -436,13 +439,14 @@ int rtos_generic_stack_read(struct target *target,
 		return -5;
 	}
 	/* Read the stack */
-	uint8_t *stack_data = (uint8_t *) malloc(stacking->stack_registers_size);
+	uint8_t *stack_data = malloc(stacking->stack_registers_size);
 	uint32_t address = stack_ptr;
 
 	if (stacking->stack_growth_direction == 1)
 		address -= stacking->stack_registers_size;
 	retval = target_read_buffer(target, address, stacking->stack_registers_size, stack_data);
 	if (retval != ERROR_OK) {
+		free(stack_data);
 		LOG_ERROR("Error reading stack frame from thread");
 		return retval;
 	}
@@ -454,7 +458,7 @@ int rtos_generic_stack_read(struct target *target,
 #endif
 	for (i = 0; i < stacking->num_output_registers; i++)
 		list_size += stacking->register_offsets[i].width_bits/8;
-	*hex_reg_list = (char *)malloc(list_size*2 + 1);
+	*hex_reg_list = malloc(list_size*2 + 1);
 	tmp_str_ptr = *hex_reg_list;
 	new_stack_ptr = stack_ptr - stacking->stack_growth_direction *
 		stacking->stack_registers_size;
@@ -477,6 +481,7 @@ int rtos_generic_stack_read(struct target *target,
 						stack_data[stacking->register_offsets[i].offset + j]);
 		}
 	}
+	free(stack_data);
 /*	LOG_OUTPUT("Output register string: %s\r\n", *hex_reg_list); */
 	return ERROR_OK;
 }
@@ -509,4 +514,21 @@ int rtos_update_threads(struct target *target)
 	if ((target->rtos != NULL) && (target->rtos->type != NULL))
 		target->rtos->type->update_threads(target->rtos);
 	return ERROR_OK;
+}
+
+void rtos_free_threadlist(struct rtos *rtos)
+{
+	if (rtos->thread_details) {
+		int j;
+
+		for (j = 0; j < rtos->thread_count; j++) {
+			struct thread_detail *current_thread = &rtos->thread_details[j];
+			free(current_thread->display_str);
+			free(current_thread->thread_name_str);
+			free(current_thread->extra_info_str);
+		}
+		free(rtos->thread_details);
+		rtos->thread_details = NULL;
+		rtos->thread_count = 0;
+	}
 }

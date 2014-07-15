@@ -111,7 +111,9 @@
 #define FLASH_PSIZE_16 (1 << 8)
 #define FLASH_PSIZE_32 (2 << 8)
 #define FLASH_PSIZE_64 (3 << 8)
-#define FLASH_SNB(a)   ((a) << 3)
+/* The sector number encoding is not straight binary for dual bank flash.
+ * Warning: evaluates the argument multiple times */
+#define FLASH_SNB(a)   ((((a) >= 12) ? 0x10 | ((a) - 12) : (a)) << 3)
 #define FLASH_LOCK     (1 << 31)
 
 /* FLASH_SR register bits */
@@ -256,7 +258,7 @@ static int stm32x_unlock_reg(struct target *target)
 		return retval;
 
 	if (ctrl & FLASH_LOCK) {
-		LOG_ERROR("flash not unlocked STM32_FLASH_CR: %x", ctrl);
+		LOG_ERROR("flash not unlocked STM32_FLASH_CR: %" PRIx32, ctrl);
 		return ERROR_TARGET_FAILURE;
 	}
 
@@ -288,7 +290,7 @@ static int stm32x_unlock_option_reg(struct target *target)
 		return retval;
 
 	if (ctrl & OPT_LOCK) {
-		LOG_ERROR("options not unlocked STM32_FLASH_OPTCR: %x", ctrl);
+		LOG_ERROR("options not unlocked STM32_FLASH_OPTCR: %" PRIx32, ctrl);
 		return ERROR_TARGET_FAILURE;
 	}
 
@@ -370,7 +372,7 @@ static int stm32x_write_options(struct flash_bank *bank)
 		return retval;
 
 	/* relock registers */
-	retval = target_write_u32(target, STM32_FLASH_OPTCR, OPT_LOCK);
+	retval = target_write_u32(target, STM32_FLASH_OPTCR, optiondata | OPT_LOCK);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -379,13 +381,7 @@ static int stm32x_write_options(struct flash_bank *bank)
 
 static int stm32x_protect_check(struct flash_bank *bank)
 {
-	struct target *target = bank->target;
 	struct stm32x_flash_bank *stm32x_info = bank->driver_priv;
-
-	if (target->state != TARGET_HALTED) {
-		LOG_ERROR("Target not halted");
-		return ERROR_TARGET_NOT_HALTED;
-	}
 
 	/* read write protection settings */
 	int retval = stm32x_read_options(bank);
@@ -409,6 +405,9 @@ static int stm32x_erase(struct flash_bank *bank, int first, int last)
 	struct target *target = bank->target;
 	int i;
 
+	assert(first < bank->num_sectors);
+	assert(last < bank->num_sectors);
+
 	if (bank->target->state != TARGET_HALTED) {
 		LOG_ERROR("Target not halted");
 		return ERROR_TARGET_NOT_HALTED;
@@ -424,7 +423,7 @@ static int stm32x_erase(struct flash_bank *bank, int first, int last)
 	To erase a sector, follow the procedure below:
 	1. Check that no Flash memory operation is ongoing by checking the BSY bit in the
 	  FLASH_SR register
-	2. Set the SER bit and select the sector (out of the 12 sectors in the main memory block)
+	2. Set the SER bit and select the sector
 	  you wish to erase (SNB) in the FLASH_CR register
 	3. Set the STRT bit in the FLASH_CR register
 	4. Wait for the BSY bit to be cleared
@@ -482,7 +481,7 @@ static int stm32x_protect(struct flash_bank *bank, int set, int first, int last)
 	return ERROR_OK;
 }
 
-static int stm32x_write_block(struct flash_bank *bank, uint8_t *buffer,
+static int stm32x_write_block(struct flash_bank *bank, const uint8_t *buffer,
 		uint32_t offset, uint32_t count)
 {
 	struct target *target = bank->target;
@@ -542,7 +541,7 @@ static int stm32x_write_block(struct flash_bank *bank, uint8_t *buffer,
 
 	retval = target_write_buffer(target, write_algorithm->address,
 			sizeof(stm32x_flash_write_code),
-			(uint8_t *)stm32x_flash_write_code);
+			stm32x_flash_write_code);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -590,7 +589,7 @@ static int stm32x_write_block(struct flash_bank *bank, uint8_t *buffer,
 			LOG_ERROR("flash memory write protected");
 
 		if (error != 0) {
-			LOG_ERROR("flash write failed = %08x", error);
+			LOG_ERROR("flash write failed = %08" PRIx32, error);
 			/* Clear but report errors */
 			target_write_u32(target, STM32_FLASH_SR, error);
 			retval = ERROR_FAIL;
@@ -609,7 +608,7 @@ static int stm32x_write_block(struct flash_bank *bank, uint8_t *buffer,
 	return retval;
 }
 
-static int stm32x_write(struct flash_bank *bank, uint8_t *buffer,
+static int stm32x_write(struct flash_bank *bank, const uint8_t *buffer,
 		uint32_t offset, uint32_t count)
 {
 	struct target *target = bank->target;
@@ -776,7 +775,12 @@ static int stm32x_probe(struct flash_bank *bank)
 		break;
 	case 0x419:
 		max_flash_size_in_kb = 2048;
-		stm32x_info->has_large_mem = true;
+		break;
+	case 0x423:
+		max_flash_size_in_kb = 256;
+		break;
+	case 0x433:
+		max_flash_size_in_kb = 512;
 		break;
 	default:
 		LOG_WARNING("Cannot identify target as a STM32 family.");
@@ -800,6 +804,10 @@ static int stm32x_probe(struct flash_bank *bank)
 		LOG_INFO("ignoring flash probed value, using configured bank size");
 		flash_size_in_kb = stm32x_info->user_bank_size / 1024;
 	}
+
+	/* only devices with > 1024kB have dual banks */
+	if (flash_size_in_kb > 1024)
+		stm32x_info->has_large_mem = true;
 
 	LOG_INFO("flash size = %dkbytes", flash_size_in_kb);
 
@@ -863,67 +871,88 @@ static int stm32x_auto_probe(struct flash_bank *bank)
 
 static int get_stm32x_info(struct flash_bank *bank, char *buf, int buf_size)
 {
-	uint32_t device_id;
-	int printed;
+	uint32_t dbgmcu_idcode;
 
 	/* read stm32 device id register */
-	int retval = stm32x_get_device_id(bank, &device_id);
+	int retval = stm32x_get_device_id(bank, &dbgmcu_idcode);
 	if (retval != ERROR_OK)
 		return retval;
 
-	if ((device_id & 0xfff) == 0x411) {
-		printed = snprintf(buf, buf_size, "stm32f2x - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+	uint16_t device_id = dbgmcu_idcode & 0xfff;
+	uint16_t rev_id = dbgmcu_idcode >> 16;
+	const char *device_str;
+	const char *rev_str = NULL;
 
-		switch (device_id >> 16) {
-			case 0x1000:
-				snprintf(buf, buf_size, "A");
-				break;
+	switch (device_id) {
+	case 0x411:
+		device_str = "STM32F2xx";
 
-			case 0x2000:
-				snprintf(buf, buf_size, "B");
-				break;
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
 
-			case 0x1001:
-				snprintf(buf, buf_size, "Z");
-				break;
+		case 0x2000:
+			rev_str = "B";
+			break;
 
-			case 0x2001:
-				snprintf(buf, buf_size, "Y");
-				break;
+		case 0x1001:
+			rev_str = "Z";
+			break;
 
-			case 0x2003:
-				snprintf(buf, buf_size, "X");
-				break;
+		case 0x2001:
+			rev_str = "Y";
+			break;
 
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		case 0x2003:
+			rev_str = "X";
+			break;
 		}
-	} else if (((device_id & 0xfff) == 0x413) ||
-			((device_id & 0xfff) == 0x419)) {
-		printed = snprintf(buf, buf_size, "stm32f4x - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+		break;
 
-		switch (device_id >> 16) {
-			case 0x1000:
-				snprintf(buf, buf_size, "A");
-				break;
+	case 0x413:
+	case 0x419:
+		device_str = "STM32F4xx";
 
-			case 0x1001:
-				snprintf(buf, buf_size, "Z");
-				break;
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
 
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		case 0x1001:
+			rev_str = "Z";
+			break;
+
+		case 0x1003:
+			rev_str = "Y";
+			break;
 		}
-	} else {
-		snprintf(buf, buf_size, "Cannot identify target as a stm32x\n");
+		break;
+
+	case 0x423:
+	case 0x433:
+		device_str = "STM32F4xx (Low Power)";
+
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
+
+		case 0x1001:
+			rev_str = "Z";
+			break;
+		}
+		break;
+
+	default:
+		snprintf(buf, buf_size, "Cannot identify target as a STM32F2/4\n");
 		return ERROR_FAIL;
 	}
+
+	if (rev_str != NULL)
+		snprintf(buf, buf_size, "%s - Rev: %s", device_str, rev_str);
+	else
+		snprintf(buf, buf_size, "%s - Rev: unknown (0x%04x)", device_str, rev_id);
 
 	return ERROR_OK;
 }

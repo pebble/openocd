@@ -74,7 +74,7 @@ COMMAND_HANDLER(handle_flash_info_command)
 			return retval;
 
 		command_print(CMD_CTX,
-			"#%" PRIu32 " : %s at 0x%8.8" PRIx32 ", size 0x%8.8" PRIx32
+			"#%d : %s at 0x%8.8" PRIx32 ", size 0x%8.8" PRIx32
 			", buswidth %i, chipwidth %i",
 			p->bank_number,
 			p->driver->name,
@@ -101,12 +101,13 @@ COMMAND_HANDLER(handle_flash_info_command)
 				protect_state);
 		}
 
-		*buf = '\0';	/* initialize buffer, otherwise it migh contain garbage if driver
-				 *function fails */
-		retval = p->driver->info(p, buf, sizeof(buf));
-		command_print(CMD_CTX, "%s", buf);
-		if (retval != ERROR_OK)
-			LOG_ERROR("error retrieving flash info");
+		if (p->driver->info != NULL) {
+			retval = p->driver->info(p, buf, sizeof(buf));
+			if (retval == ERROR_OK)
+				command_print(CMD_CTX, "%s", buf);
+			else
+				LOG_ERROR("error retrieving flash info");
+		}
 	}
 
 	return retval;
@@ -235,7 +236,7 @@ COMMAND_HANDLER(handle_flash_erase_address_command)
 		retval = flash_erase_address_range(target, do_pad, address, length);
 
 	if ((ERROR_OK == retval) && (duration_measure(&bench) == ERROR_OK)) {
-		command_print(CMD_CTX, "erased address 0x%8.8x (length %i)"
+		command_print(CMD_CTX, "erased address 0x%8.8" PRIx32 " (length %" PRIi32 ")"
 			" in %fs (%0.3f KiB/s)", address, length,
 			duration_elapsed(&bench), duration_kbps(&bench, length));
 	}
@@ -293,7 +294,7 @@ COMMAND_HANDLER(handle_flash_erase_command)
 
 	if ((ERROR_OK == retval) && (duration_measure(&bench) == ERROR_OK)) {
 		command_print(CMD_CTX, "erased sectors %" PRIu32 " "
-			"through %" PRIu32 " on flash bank %" PRIu32 " "
+			"through %" PRIu32 " on flash bank %d "
 			"in %fs", first, last, p->bank_number, duration_elapsed(&bench));
 	}
 
@@ -331,7 +332,7 @@ COMMAND_HANDLER(handle_flash_protect_command)
 	retval = flash_driver_protect(p, set, first, last);
 	if (retval == ERROR_OK) {
 		command_print(CMD_CTX, "%s protection for sectors %i "
-			"through %i on flash bank %" PRIu32 "",
+			"through %i on flash bank %d",
 			(set) ? "set" : "cleared", (int) first,
 			(int) last, p->bank_number);
 	}
@@ -348,14 +349,11 @@ COMMAND_HANDLER(handle_flash_write_image_command)
 
 	int retval;
 
-	if (CMD_ARGC < 1)
-		return ERROR_COMMAND_SYNTAX_ERROR;
-
 	/* flash auto-erase is disabled by default*/
 	int auto_erase = 0;
 	bool auto_unlock = false;
 
-	for (;; ) {
+	while (CMD_ARGC) {
 		if (strcmp(CMD_ARGV[0], "erase") == 0) {
 			auto_erase = 1;
 			CMD_ARGV++;
@@ -604,6 +602,24 @@ void flash_set_dirty(void)
 	}
 }
 
+COMMAND_HANDLER(handle_flash_padded_value_command)
+{
+	if (CMD_ARGC != 2)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+
+	struct flash_bank *p;
+	int retval = CALL_COMMAND_HANDLER(flash_command_get_bank, 0, &p);
+	if (ERROR_OK != retval)
+		return retval;
+
+	COMMAND_PARSE_NUMBER(u8, CMD_ARGV[1], p->default_padded_value);
+
+	command_print(CMD_CTX, "Default padded value set to 0x%" PRIx8 " for flash bank %u", \
+			p->default_padded_value, p->bank_number);
+
+	return retval;
+}
+
 static const struct command_registration flash_exec_command_handlers[] = {
 	{
 		.name = "probe",
@@ -699,6 +715,13 @@ static const struct command_registration flash_exec_command_handlers[] = {
 		.help = "Turn protection on or off for a range of sectors "
 			"in a given flash bank.",
 	},
+	{
+		.name = "padded_value",
+		.handler = handle_flash_padded_value_command,
+		.mode = COMMAND_EXEC,
+		.usage = "bank_id value",
+		.help = "Set default flash padded value",
+	},
 	COMMAND_REGISTRATION_DONE
 };
 
@@ -710,7 +733,6 @@ static int flash_init_drivers(struct command_context *cmd_ctx)
 	struct command *parent = command_find_in_context(cmd_ctx, "flash");
 	return register_commands(cmd_ctx, parent, flash_exec_command_handlers);
 }
-
 
 COMMAND_HANDLER(handle_flash_bank_command)
 {
@@ -764,6 +786,7 @@ COMMAND_HANDLER(handle_flash_bank_command)
 	COMMAND_PARSE_NUMBER(u32, CMD_ARGV[2], c->size);
 	COMMAND_PARSE_NUMBER(int, CMD_ARGV[3], c->chip_width);
 	COMMAND_PARSE_NUMBER(int, CMD_ARGV[4], c->bus_width);
+	c->default_padded_value = 0xff;
 	c->num_sectors = 0;
 	c->sectors = NULL;
 	c->next = NULL;
@@ -771,7 +794,7 @@ COMMAND_HANDLER(handle_flash_bank_command)
 	int retval;
 	retval = CALL_COMMAND_HANDLER(driver->flash_bank_command, c);
 	if (ERROR_OK != retval) {
-		LOG_ERROR("'%s' driver rejected flash bank at 0x%8.8" PRIx32 "Usage %s",
+		LOG_ERROR("'%s' driver rejected flash bank at 0x%8.8" PRIx32 "; usage: %s",
 			driver_name, c->base, driver->usage);
 		free(c);
 		return retval;
@@ -792,7 +815,7 @@ COMMAND_HANDLER(handle_flash_banks_command)
 
 	unsigned n = 0;
 	for (struct flash_bank *p = flash_bank_list(); p; p = p->next, n++) {
-		LOG_USER("#%" PRIu32 " : %s (%s) at 0x%8.8" PRIx32 ", size 0x%8.8" PRIx32 ", "
+		LOG_USER("#%d : %s (%s) at 0x%8.8" PRIx32 ", size 0x%8.8" PRIx32 ", "
 			"buswidth %u, chipwidth %u", p->bank_number,
 			p->name, p->driver->name, p->base, p->size,
 			p->bus_width, p->chip_width);

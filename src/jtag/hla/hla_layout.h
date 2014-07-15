@@ -35,43 +35,46 @@ extern struct hl_layout_api_s icdi_usb_layout_api;
 /** */
 struct hl_layout_api_s {
 	/** */
-	int (*open) (struct hl_interface_param_s *param, void **fd);
+	int (*open) (struct hl_interface_param_s *param, void **handle);
 	/** */
-	int (*close) (void *fd);
+	int (*close) (void *handle);
 	/** */
-	int (*reset) (void *fd);
+	int (*reset) (void *handle);
 	/** */
-	int (*assert_srst) (void *fd, int srst);
+	int (*assert_srst) (void *handle, int srst);
 	/** */
-	int (*run) (void *fd);
+	int (*run) (void *handle);
 	/** */
-	int (*halt) (void *fd);
+	int (*halt) (void *handle);
 	/** */
-	int (*step) (void *fd);
+	int (*step) (void *handle);
 	/** */
-	int (*read_regs) (void *fd);
+	int (*read_regs) (void *handle);
 	/** */
-	int (*read_reg) (void *fd, int num, uint32_t *val);
+	int (*read_reg) (void *handle, int num, uint32_t *val);
 	/** */
-	int (*write_reg) (void *fd, int num, uint32_t val);
+	int (*write_reg) (void *handle, int num, uint32_t val);
 	/** */
-	int (*read_mem8) (void *handle, uint32_t addr, uint16_t len,
-			   uint8_t *buffer);
+	int (*read_mem) (void *handle, uint32_t addr, uint32_t size,
+			uint32_t count, uint8_t *buffer);
 	/** */
-	int (*write_mem8) (void *handle, uint32_t addr, uint16_t len,
-			    const uint8_t *buffer);
-	/** */
-	int (*read_mem32) (void *handle, uint32_t addr, uint16_t len,
-			   uint8_t *buffer);
-	/** */
-	int (*write_mem32) (void *handle, uint32_t addr, uint16_t len,
-			    const uint8_t *buffer);
+	int (*write_mem) (void *handle, uint32_t addr, uint32_t size,
+			uint32_t count, const uint8_t *buffer);
 	/** */
 	int (*write_debug_reg) (void *handle, uint32_t addr, uint32_t val);
+	/**
+	 * Read the idcode of the target connected to the adapter
+	 *
+	 * If the adapter doesn't support idcode retrieval, this callback should
+	 * store 0 to indicate a wildcard match.
+	 *
+	 * @param handle A pointer to the device-specific handle
+	 * @param idcode Storage for the detected idcode
+	 * @returns ERROR_OK on success, or an error code on failure.
+	 */
+	int (*idcode) (void *handle, uint32_t *idcode);
 	/** */
-	int (*idcode) (void *fd, uint32_t *idcode);
-	/** */
-	enum target_state (*state) (void *fd);
+	enum target_state (*state) (void *handle);
 };
 
 /** */

@@ -823,6 +823,7 @@ static int arm920t_init_arch_info(struct target *target,
 
 	arm7_9->post_debug_entry = arm920t_post_debug_entry;
 	arm7_9->pre_restore_context = arm920t_pre_restore_context;
+	arm7_9->write_memory = arm920t_write_memory;
 
 	arm920t->armv4_5_mmu.armv4_5_cache.ctype = -1;
 	arm920t->armv4_5_mmu.get_ttb = arm920t_get_ttb;
@@ -1697,13 +1698,11 @@ struct target_type arm920t_target = {
 	.get_gdb_reg_list = arm_get_gdb_reg_list,
 
 	.read_memory = arm920t_read_memory,
-	.write_memory = arm920t_write_memory,
+	.write_memory = arm7_9_write_memory_opt,
 	.read_phys_memory = arm920t_read_phys_memory,
 	.write_phys_memory = arm920t_write_phys_memory,
 	.mmu = arm920_mmu,
 	.virt2phys = arm920_virt2phys,
-
-	.bulk_write_memory = arm7_9_bulk_write_memory,
 
 	.checksum_memory = arm_checksum_memory,
 	.blank_check_memory = arm_blank_check_memory,

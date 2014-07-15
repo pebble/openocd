@@ -18,8 +18,13 @@
 # split out "chip" and "tag" so we can someday handle
 # them more uniformly irlen too...)
 
+if [catch {transport select}] {
+ echo "Info : session transport was not selected, defaulting to JTAG"
+ transport select jtag
+}
+
 proc swj_newdap {chip tag args} {
-set tran [transport select]
-if [string equal $tran "jtag"] { eval jtag newtap $chip $tag $args}
-if [string equal $tran "swd"] { eval swd newdap $chip $tag $args }
+ if {[using_jtag]} { eval jtag newtap $chip $tag $args }
+ if {[using_swd]} { eval swd newdap $chip $tag $args }
+ if {[string equal [transport select] "cmsis-dap"]} { eval cmsis-dap newdap $chip $tag $args }
 }

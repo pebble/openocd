@@ -8,6 +8,9 @@
  *   Copyright (C) 2012 by Christopher D. Kilgour                          *
  *   techie at whiterocker.com                                             *
  *                                                                         *
+ *   Copyright (C) 2013 Nemui Trinomius                                    *
+ *   nemuisan_kawausogasuki@live.jp                                        *
+ *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
  *   the Free Software Foundation; either version 2 of the License, or     *
@@ -29,7 +32,10 @@
 #endif
 
 #include "imp.h"
-#include "helper/binarybuffer.h"
+#include <helper/binarybuffer.h>
+#include <target/algorithm.h>
+#include <target/armv7m.h>
+#include <target/cortex_m.h>
 
 /*
  * Implementation Notes
@@ -79,12 +85,9 @@
  * and FlexNVM/FlexRAM, so flash command arguments may differ between
  * blocks in the same chip.
  *
- * Although not documented as such by Freescale, it appears that bits
- * 8:7 of the read-only SIM_SDID register reflect the granularity
- * settings 0..3, so sector sizes and block counts are applicable
- * according to the following table.
  */
-const struct {
+
+static const struct {
 	unsigned pflash_sector_size_bytes;
 	unsigned nvm_sector_size_bytes;
 	unsigned num_blocks;
@@ -106,18 +109,81 @@ const struct {
 #define SIM_FCFG2	0x40048050
 
 /* Commands */
-#define FTFx_CMD_BLOCKSTAT 0x00
-#define FTFx_CMD_SECTSTAT 0x01
-#define FTFx_CMD_LWORDPROG 0x06
-#define FTFx_CMD_SECTERASE 0x09
-#define FTFx_CMD_SECTWRITE 0x0b
+#define FTFx_CMD_BLOCKSTAT  0x00
+#define FTFx_CMD_SECTSTAT   0x01
+#define FTFx_CMD_LWORDPROG  0x06
+#define FTFx_CMD_SECTERASE  0x09
+#define FTFx_CMD_SECTWRITE  0x0b
 #define FTFx_CMD_SETFLEXRAM 0x81
+#define FTFx_CMD_MASSERASE  0x44
+
+/* The Kinetis K series uses the following SDID layout :
+ * Bit 31-16 : 0
+ * Bit 15-12 : REVID
+ * Bit 11-7  : DIEID
+ * Bit 6-4   : FAMID
+ * Bit 3-0   : PINID
+ *
+ * The Kinetis KL series uses the following SDID layout :
+ * Bit 31-28 : FAMID
+ * Bit 27-24 : SUBFAMID
+ * Bit 23-20 : SERIESID
+ * Bit 19-16 : SRAMSIZE
+ * Bit 15-12 : REVID
+ * Bit 6-4   : Reserved (0)
+ * Bit 3-0   : PINID
+ *
+ * SERIESID should be 1 for the KL-series so we assume that if
+ * bits 31-16 are 0 then it's a K-series MCU.
+ */
+
+#define KINETIS_SDID_K_SERIES_MASK  0x0000FFFF
+
+#define KINETIS_SDID_DIEID_MASK 0x00000F80
+#define KINETIS_SDID_DIEID_K_A	0x00000100
+#define KINETIS_SDID_DIEID_K_B	0x00000200
+#define KINETIS_SDID_DIEID_KL	0x00000000
+
+/* We can't rely solely on the FAMID field to determine the MCU
+ * type since some FAMID values identify multiple MCUs with
+ * different flash sector sizes (K20 and K22 for instance).
+ * Therefore we combine it with the DIEID bits which may possibly
+ * break if Freescale bumps the DIEID for a particular MCU. */
+#define KINETIS_K_SDID_TYPE_MASK 0x00000FF0
+#define KINETIS_K_SDID_K10_M50	 0x00000000
+#define KINETIS_K_SDID_K10_M72	 0x00000080
+#define KINETIS_K_SDID_K10_M100	 0x00000100
+#define KINETIS_K_SDID_K10_M120	 0x00000180
+#define KINETIS_K_SDID_K11		 0x00000220
+#define KINETIS_K_SDID_K12		 0x00000200
+#define KINETIS_K_SDID_K20_M50	 0x00000010
+#define KINETIS_K_SDID_K20_M72	 0x00000090
+#define KINETIS_K_SDID_K20_M100	 0x00000110
+#define KINETIS_K_SDID_K20_M120	 0x00000190
+#define KINETIS_K_SDID_K21_M50   0x00000230
+#define KINETIS_K_SDID_K21_M120	 0x00000330
+#define KINETIS_K_SDID_K22_M50   0x00000210
+#define KINETIS_K_SDID_K22_M120	 0x00000310
+#define KINETIS_K_SDID_K30_M72   0x000000A0
+#define KINETIS_K_SDID_K30_M100  0x00000120
+#define KINETIS_K_SDID_K40_M72   0x000000B0
+#define KINETIS_K_SDID_K40_M100  0x00000130
+#define KINETIS_K_SDID_K50_M72   0x000000E0
+#define KINETIS_K_SDID_K51_M72	 0x000000F0
+#define KINETIS_K_SDID_K53		 0x00000170
+#define KINETIS_K_SDID_K60_M100  0x00000140
+#define KINETIS_K_SDID_K60_M150  0x000001C0
+#define KINETIS_K_SDID_K70_M150  0x000001D0
+
+#define KINETIS_KL_SDID_SERIESID_MASK 0x00F00000
+#define KINETIS_KL_SDID_SERIESID_KL   0x00100000
 
 struct kinetis_flash_bank {
 	unsigned granularity;
 	unsigned bank_ordinal;
 	uint32_t sector_size;
 	uint32_t protection_size;
+	uint32_t klxx;
 
 	uint32_t sim_sdid;
 	uint32_t sim_fcfg1;
@@ -130,6 +196,278 @@ struct kinetis_flash_bank {
 		FC_FLEX_RAM,
 	} flash_class;
 };
+
+
+
+#define MDM_REG_STAT		0x00
+#define MDM_REG_CTRL		0x04
+#define MDM_REG_ID		0xfc
+
+#define MDM_STAT_FMEACK		(1<<0)
+#define MDM_STAT_FREADY		(1<<1)
+#define MDM_STAT_SYSSEC		(1<<2)
+#define MDM_STAT_SYSRES		(1<<3)
+#define MDM_STAT_FMEEN		(1<<5)
+#define MDM_STAT_BACKDOOREN	(1<<6)
+#define MDM_STAT_LPEN		(1<<7)
+#define MDM_STAT_VLPEN		(1<<8)
+#define MDM_STAT_LLSMODEXIT	(1<<9)
+#define MDM_STAT_VLLSXMODEXIT	(1<<10)
+#define MDM_STAT_CORE_HALTED	(1<<16)
+#define MDM_STAT_CORE_SLEEPDEEP	(1<<17)
+#define MDM_STAT_CORESLEEPING	(1<<18)
+
+#define MEM_CTRL_FMEIP		(1<<0)
+#define MEM_CTRL_DBG_DIS	(1<<1)
+#define MEM_CTRL_DBG_REQ	(1<<2)
+#define MEM_CTRL_SYS_RES_REQ	(1<<3)
+#define MEM_CTRL_CORE_HOLD_RES	(1<<4)
+#define MEM_CTRL_VLLSX_DBG_REQ	(1<<5)
+#define MEM_CTRL_VLLSX_DBG_ACK	(1<<6)
+#define MEM_CTRL_VLLSX_STAT_ACK	(1<<7)
+
+#define MDM_ACCESS_TIMEOUT	3000 /* iterations */
+
+static int kinetis_mdm_write_register(struct adiv5_dap *dap, unsigned reg, uint32_t value)
+{
+	int retval;
+	LOG_DEBUG("MDM_REG[0x%02x] <- %08" PRIX32, reg, value);
+
+	retval = dap_queue_ap_write(dap, reg, value);
+	if (retval != ERROR_OK) {
+		LOG_DEBUG("MDM: failed to queue a write request");
+		return retval;
+	}
+
+	retval = dap_run(dap);
+	if (retval != ERROR_OK) {
+		LOG_DEBUG("MDM: dap_run failed");
+		return retval;
+	}
+
+
+	return ERROR_OK;
+}
+
+static int kinetis_mdm_read_register(struct adiv5_dap *dap, unsigned reg, uint32_t *result)
+{
+	int retval;
+	retval = dap_queue_ap_read(dap, reg, result);
+	if (retval != ERROR_OK) {
+		LOG_DEBUG("MDM: failed to queue a read request");
+		return retval;
+	}
+
+	retval = dap_run(dap);
+	if (retval != ERROR_OK) {
+		LOG_DEBUG("MDM: dap_run failed");
+		return retval;
+	}
+
+	LOG_DEBUG("MDM_REG[0x%02x]: %08" PRIX32, reg, *result);
+	return ERROR_OK;
+}
+
+static int kinetis_mdm_poll_register(struct adiv5_dap *dap, unsigned reg, uint32_t mask, uint32_t value)
+{
+	uint32_t val;
+	int retval;
+	int timeout = MDM_ACCESS_TIMEOUT;
+
+	do {
+		retval = kinetis_mdm_read_register(dap, reg, &val);
+		if (retval != ERROR_OK || (val & mask) == value)
+			return retval;
+
+		alive_sleep(1);
+	} while (timeout--);
+
+	LOG_DEBUG("MDM: polling timed out");
+	return ERROR_FAIL;
+}
+
+/*
+ * This function implements the procedure to mass erase the flash via
+ * SWD/JTAG on Kinetis K and L series of devices as it is described in
+ * AN4835 "Production Flash Programming Best Practices for Kinetis K-
+ * and L-series MCUs" Section 4.2.1
+ */
+COMMAND_HANDLER(kinetis_mdm_mass_erase)
+{
+	struct target *target = get_current_target(CMD_CTX);
+	struct cortex_m_common *cortex_m = target_to_cm(target);
+	struct adiv5_dap *dap = cortex_m->armv7m.arm.dap;
+
+	if (!dap) {
+		LOG_ERROR("Cannot perform mass erase with a high-level adapter");
+		return ERROR_FAIL;
+	}
+
+	int retval;
+	const uint8_t original_ap = dap->ap_current;
+
+	/*
+	 * ... Power on the processor, or if power has already been
+	 * applied, assert the RESET pin to reset the processor. For
+	 * devices that do not have a RESET pin, write the System
+	 * Reset Request bit in the MDM-AP control register after
+	 * establishing communication...
+	 */
+	dap_ap_select(dap, 1);
+
+	retval = kinetis_mdm_write_register(dap, MDM_REG_CTRL, MEM_CTRL_SYS_RES_REQ);
+	if (retval != ERROR_OK)
+		return retval;
+
+	/*
+	 * ... Read the MDM-AP status register until the Flash Ready bit sets...
+	 */
+	retval = kinetis_mdm_poll_register(dap, MDM_REG_STAT,
+					   MDM_STAT_FREADY | MDM_STAT_SYSRES,
+					   MDM_STAT_FREADY);
+	if (retval != ERROR_OK) {
+		LOG_ERROR("MDM : flash ready timeout");
+		return retval;
+	}
+
+	/*
+	 * ... Write the MDM-AP control register to set the Flash Mass
+	 * Erase in Progress bit. This will start the mass erase
+	 * process...
+	 */
+	retval = kinetis_mdm_write_register(dap, MDM_REG_CTRL,
+					    MEM_CTRL_SYS_RES_REQ | MEM_CTRL_FMEIP);
+	if (retval != ERROR_OK)
+		return retval;
+
+	/* As a sanity check make sure that device started mass erase procedure */
+	retval = kinetis_mdm_poll_register(dap, MDM_REG_STAT,
+					   MDM_STAT_FMEACK, MDM_STAT_FMEACK);
+	if (retval != ERROR_OK)
+		return retval;
+
+	/*
+	 * ... Read the MDM-AP control register until the Flash Mass
+	 * Erase in Progress bit clears...
+	 */
+	retval = kinetis_mdm_poll_register(dap, MDM_REG_CTRL,
+					   MEM_CTRL_FMEIP,
+					   0);
+	if (retval != ERROR_OK)
+		return retval;
+
+	/*
+	 * ... Negate the RESET signal or clear the System Reset Request
+	 * bit in the MDM-AP control register...
+	 */
+	retval = kinetis_mdm_write_register(dap, MDM_REG_CTRL, 0);
+	if (retval != ERROR_OK)
+		return retval;
+
+	dap_ap_select(dap, original_ap);
+	return ERROR_OK;
+}
+
+static const uint32_t kinetis_known_mdm_ids[] = {
+	0x001C0000,	/* Kinetis-K Series */
+	0x001C0020,	/* Kinetis-L/M/V/E Series */
+};
+
+/*
+ * This function implements the procedure to connect to
+ * SWD/JTAG on Kinetis K and L series of devices as it is described in
+ * AN4835 "Production Flash Programming Best Practices for Kinetis K-
+ * and L-series MCUs" Section 4.1.1
+ */
+COMMAND_HANDLER(kinetis_check_flash_security_status)
+{
+	struct target *target = get_current_target(CMD_CTX);
+	struct cortex_m_common *cortex_m = target_to_cm(target);
+	struct adiv5_dap *dap = cortex_m->armv7m.arm.dap;
+
+	if (!dap) {
+		LOG_WARNING("Cannot check flash security status with a high-level adapter");
+		return ERROR_OK;
+	}
+
+	uint32_t val;
+	int retval;
+	const uint8_t origninal_ap = dap->ap_current;
+
+	dap_ap_select(dap, 1);
+
+
+	/*
+	 * ... The MDM-AP ID register can be read to verify that the
+	 * connection is working correctly...
+	 */
+	retval = kinetis_mdm_read_register(dap, MDM_REG_ID, &val);
+	if (retval != ERROR_OK) {
+		LOG_ERROR("MDM: failed to read ID register");
+		goto fail;
+	}
+
+	bool found = false;
+	for (size_t i = 0; i < ARRAY_SIZE(kinetis_known_mdm_ids); i++) {
+		if (val == kinetis_known_mdm_ids[i]) {
+			found = true;
+			break;
+		}
+	}
+
+	if (!found)
+		LOG_WARNING("MDM: unknown ID %08" PRIX32, val);
+
+	/*
+	 * ... Read the MDM-AP status register until the Flash Ready bit sets...
+	 */
+	retval = kinetis_mdm_poll_register(dap, MDM_REG_STAT,
+					   MDM_STAT_FREADY,
+					   MDM_STAT_FREADY);
+	if (retval != ERROR_OK) {
+		LOG_ERROR("MDM: flash ready timeout");
+		goto fail;
+	}
+
+	/*
+	 * ... Read the System Security bit to determine if security is enabled.
+	 * If System Security = 0, then proceed. If System Security = 1, then
+	 * communication with the internals of the processor, including the
+	 * flash, will not be possible without issuing a mass erase command or
+	 * unsecuring the part through other means (backdoor key unlock)...
+	 */
+	retval = kinetis_mdm_read_register(dap, MDM_REG_STAT, &val);
+	if (retval != ERROR_OK) {
+		LOG_ERROR("MDM: failed to read MDM_REG_STAT");
+		goto fail;
+	}
+
+	if (val & MDM_STAT_SYSSEC) {
+		jtag_poll_set_enabled(false);
+
+		LOG_WARNING("*********** ATTENTION! ATTENTION! ATTENTION! ATTENTION! **********");
+		LOG_WARNING("****                                                          ****");
+		LOG_WARNING("**** Your Kinetis MCU is in secured state, which means that,  ****");
+		LOG_WARNING("**** with exeption for very basic communication, JTAG/SWD     ****");
+		LOG_WARNING("**** interface will NOT work. In order to restore its         ****");
+		LOG_WARNING("**** functionality please issue 'kinetis mdm mass_erase'      ****");
+		LOG_WARNING("**** command, power cycle the MCU and restart openocd.        ****");
+		LOG_WARNING("****                                                          ****");
+		LOG_WARNING("*********** ATTENTION! ATTENTION! ATTENTION! ATTENTION! **********");
+	} else {
+		LOG_INFO("MDM: Chip is unsecured. Continuing.");
+		jtag_poll_set_enabled(true);
+	}
+
+	dap_ap_select(dap, origninal_ap);
+
+	return ERROR_OK;
+
+fail:
+	LOG_ERROR("MDM: Failed to check security status of the MCU. Cannot proceed further");
+	jtag_poll_set_enabled(false);
+	return retval;
+}
 
 FLASH_BANK_COMMAND_HANDLER(kinetis_flash_bank_command)
 {
@@ -149,8 +487,173 @@ FLASH_BANK_COMMAND_HANDLER(kinetis_flash_bank_command)
 	return ERROR_OK;
 }
 
-static int kinetis_protect(struct flash_bank *bank, int set, int first,
-			   int last)
+/* Kinetis Program-LongWord Microcodes */
+static const uint8_t kinetis_flash_write_code[] = {
+	/* Params:
+	 * r0 - workarea buffer
+	* r1 - target address
+	* r2 - wordcount
+	* Clobbered:
+	* r4 - tmp
+	* r5 - tmp
+	* r6 - tmp
+	* r7 - tmp
+	*/
+
+							/* .L1: */
+						/* for(register uint32_t i=0;i<wcount;i++){ */
+	0x04, 0x1C,					/* mov    r4, r0          */
+	0x00, 0x23,					/* mov    r3, #0          */
+							/* .L2: */
+	0x0E, 0x1A,					/* sub    r6, r1, r0      */
+	0xA6, 0x19,					/* add    r6, r4, r6      */
+	0x93, 0x42,					/* cmp    r3, r2          */
+	0x16, 0xD0,					/* beq    .L9             */
+							/* .L5: */
+						/* while((FTFx_FSTAT&FTFA_FSTAT_CCIF_MASK) != FTFA_FSTAT_CCIF_MASK){}; */
+	0x0B, 0x4D,					/* ldr    r5, .L10        */
+	0x2F, 0x78,					/* ldrb   r7, [r5]        */
+	0x7F, 0xB2,					/* sxtb   r7, r7          */
+	0x00, 0x2F,					/* cmp    r7, #0          */
+	0xFA, 0xDA,					/* bge    .L5             */
+						/* FTFx_FSTAT = FTFA_FSTAT_ACCERR_MASK|FTFA_FSTAT_FPVIOL_MASK|FTFA_FSTAT_RDCO */
+	0x70, 0x27,					/* mov    r7, #112        */
+	0x2F, 0x70,					/* strb   r7, [r5]        */
+						/* FTFx_FCCOB3 = faddr; */
+	0x09, 0x4F,					/* ldr    r7, .L10+4      */
+	0x3E, 0x60,					/* str    r6, [r7]        */
+	0x06, 0x27,					/* mov    r7, #6          */
+						/* FTFx_FCCOB0 = 0x06;  */
+	0x08, 0x4E,					/* ldr    r6, .L10+8      */
+	0x37, 0x70,					/* strb   r7, [r6]        */
+						/* FTFx_FCCOB7 = *pLW;  */
+	0x80, 0xCC,					/* ldmia  r4!, {r7}       */
+	0x08, 0x4E,					/* ldr    r6, .L10+12     */
+	0x37, 0x60,					/* str    r7, [r6]        */
+						/* FTFx_FSTAT = FTFA_FSTAT_CCIF_MASK; */
+	0x80, 0x27,					/* mov    r7, #128        */
+	0x2F, 0x70,					/* strb   r7, [r5]        */
+							/* .L4: */
+						/* while((FTFx_FSTAT&FTFA_FSTAT_CCIF_MASK) != FTFA_FSTAT_CCIF_MASK){}; */
+	0x2E, 0x78,					/* ldrb    r6, [r5]       */
+	0x77, 0xB2,					/* sxtb    r7, r6         */
+	0x00, 0x2F,					/* cmp     r7, #0         */
+	0xFB, 0xDA,					/* bge     .L4            */
+	0x01, 0x33,					/* add     r3, r3, #1     */
+	0xE4, 0xE7,					/* b       .L2            */
+							/* .L9: */
+	0x00, 0xBE,					/* bkpt #0                */
+							/* .L10: */
+	0x00, 0x00, 0x02, 0x40,		/* .word    1073872896    */
+	0x04, 0x00, 0x02, 0x40,		/* .word    1073872900    */
+	0x07, 0x00, 0x02, 0x40,		/* .word    1073872903    */
+	0x08, 0x00, 0x02, 0x40,		/* .word    1073872904    */
+};
+
+/* Program LongWord Block Write */
+static int kinetis_write_block(struct flash_bank *bank, const uint8_t *buffer,
+		uint32_t offset, uint32_t wcount)
+{
+	struct target *target = bank->target;
+	uint32_t buffer_size = 2048;		/* Default minimum value */
+	struct working_area *write_algorithm;
+	struct working_area *source;
+	uint32_t address = bank->base + offset;
+	struct reg_param reg_params[3];
+	struct armv7m_algorithm armv7m_info;
+	int retval = ERROR_OK;
+
+	/* Params:
+	 * r0 - workarea buffer
+	 * r1 - target address
+	 * r2 - wordcount
+	 * Clobbered:
+	 * r4 - tmp
+	 * r5 - tmp
+	 * r6 - tmp
+	 * r7 - tmp
+	 */
+
+	/* Increase buffer_size if needed */
+	if (buffer_size < (target->working_area_size/2))
+		buffer_size = (target->working_area_size/2);
+
+	LOG_INFO("Kinetis: FLASH Write ...");
+
+	/* check code alignment */
+	if (offset & 0x1) {
+		LOG_WARNING("offset 0x%" PRIx32 " breaks required 2-byte alignment", offset);
+		return ERROR_FLASH_DST_BREAKS_ALIGNMENT;
+	}
+
+	/* allocate working area with flash programming code */
+	if (target_alloc_working_area(target, sizeof(kinetis_flash_write_code),
+			&write_algorithm) != ERROR_OK) {
+		LOG_WARNING("no working area available, can't do block memory writes");
+		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
+	}
+
+	retval = target_write_buffer(target, write_algorithm->address,
+		sizeof(kinetis_flash_write_code), kinetis_flash_write_code);
+	if (retval != ERROR_OK)
+		return retval;
+
+	/* memory buffer */
+	while (target_alloc_working_area(target, buffer_size, &source) != ERROR_OK) {
+		buffer_size /= 4;
+		if (buffer_size <= 256) {
+			/* free working area, write algorithm already allocated */
+			target_free_working_area(target, write_algorithm);
+
+			LOG_WARNING("No large enough working area available, can't do block memory writes");
+			return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
+		}
+	}
+
+	armv7m_info.common_magic = ARMV7M_COMMON_MAGIC;
+	armv7m_info.core_mode = ARM_MODE_THREAD;
+
+	init_reg_param(&reg_params[0], "r0", 32, PARAM_OUT); /* *pLW (*buffer) */
+	init_reg_param(&reg_params[1], "r1", 32, PARAM_OUT); /* faddr */
+	init_reg_param(&reg_params[2], "r2", 32, PARAM_OUT); /* number of words to program */
+
+	/* write code buffer and use Flash programming code within kinetis       */
+	/* Set breakpoint to 0 with time-out of 1000 ms                          */
+	while (wcount > 0) {
+		uint32_t thisrun_count = (wcount > (buffer_size / 4)) ? (buffer_size / 4) : wcount;
+
+		retval = target_write_buffer(target, source->address, thisrun_count * 4, buffer);
+		if (retval != ERROR_OK)
+			break;
+
+		buf_set_u32(reg_params[0].value, 0, 32, source->address);
+		buf_set_u32(reg_params[1].value, 0, 32, address);
+		buf_set_u32(reg_params[2].value, 0, 32, thisrun_count);
+
+		retval = target_run_algorithm(target, 0, NULL, 3, reg_params,
+				write_algorithm->address, 0, 100000, &armv7m_info);
+		if (retval != ERROR_OK) {
+			LOG_ERROR("Error executing kinetis Flash programming algorithm");
+			retval = ERROR_FLASH_OPERATION_FAILED;
+			break;
+		}
+
+		buffer += thisrun_count * 4;
+		address += thisrun_count * 4;
+		wcount -= thisrun_count;
+	}
+
+	target_free_working_area(target, source);
+	target_free_working_area(target, write_algorithm);
+
+	destroy_reg_param(&reg_params[0]);
+	destroy_reg_param(&reg_params[1]);
+	destroy_reg_param(&reg_params[2]);
+
+	return retval;
+}
+
+static int kinetis_protect(struct flash_bank *bank, int set, int first, int last)
 {
 	LOG_WARNING("kinetis_protect not supported yet");
 	/* FIXME: TODO */
@@ -219,8 +722,8 @@ static int kinetis_ftfx_command(struct flash_bank *bank, uint8_t fcmd, uint32_t 
 				uint8_t *ftfx_fstat)
 {
 	uint8_t command[12] = {faddr & 0xff, (faddr >> 8) & 0xff, (faddr >> 16) & 0xff, fcmd,
-			       fccob7, fccob6, fccob5, fccob4,
-			       fccobb, fccoba, fccob9, fccob8};
+			fccob7, fccob6, fccob5, fccob4,
+			fccobb, fccoba, fccob9, fccob8};
 	int result, i;
 	uint8_t buffer;
 
@@ -259,7 +762,7 @@ static int kinetis_ftfx_command(struct flash_bank *bank, uint8_t fcmd, uint32_t 
 		return result;
 
 	/* wait for done */
-	for (i = 0; i < 50; i++) {
+	for (i = 0; i < 240; i++) { /* Need longtime for "Mass Erase" Command Nemui Changed */
 		result =
 			target_read_memory(bank->target, FTFx_FSTAT, 1, 1, ftfx_fstat);
 
@@ -274,12 +777,48 @@ static int kinetis_ftfx_command(struct flash_bank *bank, uint8_t fcmd, uint32_t 
 		LOG_ERROR
 			("ftfx command failed FSTAT: %02X FCCOB: %02X%02X%02X%02X %02X%02X%02X%02X %02X%02X%02X%02X",
 			 *ftfx_fstat, command[3], command[2], command[1], command[0],
-				      command[7], command[6], command[5], command[4],
-				      command[11], command[10], command[9], command[8]);
+			 command[7], command[6], command[5], command[4],
+			 command[11], command[10], command[9], command[8]);
 		return ERROR_FLASH_OPERATION_FAILED;
 	}
 
 	return ERROR_OK;
+}
+
+static int kinetis_mass_erase(struct flash_bank *bank)
+{
+	uint8_t ftfx_fstat;
+
+	if (bank->target->state != TARGET_HALTED) {
+		LOG_ERROR("Target not halted");
+		return ERROR_TARGET_NOT_HALTED;
+	}
+
+	LOG_INFO("Execute Erase All Blocks");
+	return kinetis_ftfx_command(bank, FTFx_CMD_MASSERASE, 0,
+				    0, 0, 0, 0,  0, 0, 0, 0,  &ftfx_fstat);
+}
+
+COMMAND_HANDLER(kinetis_securing_test)
+{
+	int result;
+	uint8_t ftfx_fstat;
+	struct target *target = get_current_target(CMD_CTX);
+	struct flash_bank *bank = NULL;
+
+	result = get_flash_bank_by_addr(target, 0x00000000, true, &bank);
+	if (result != ERROR_OK)
+		return result;
+
+	assert(bank != NULL);
+
+	if (target->state != TARGET_HALTED) {
+		LOG_ERROR("Target not halted");
+		return ERROR_TARGET_NOT_HALTED;
+	}
+
+	return kinetis_ftfx_command(bank, FTFx_CMD_SECTERASE, bank->base + 0x00000400,
+				      0, 0, 0, 0,  0, 0, 0, 0,  &ftfx_fstat);
 }
 
 static int kinetis_erase(struct flash_bank *bank, int first, int last)
@@ -294,6 +833,9 @@ static int kinetis_erase(struct flash_bank *bank, int first, int last)
 	if ((first > bank->num_sectors) || (last > bank->num_sectors))
 		return ERROR_FLASH_OPERATION_FAILED;
 
+	if ((first == 0) && (last == (bank->num_sectors - 1)))
+		return kinetis_mass_erase(bank);
+
 	/*
 	 * FIXME: TODO: use the 'Erase Flash Block' command if the
 	 * requested erase is PFlash or NVM and encompasses the entire
@@ -303,7 +845,7 @@ static int kinetis_erase(struct flash_bank *bank, int first, int last)
 		uint8_t ftfx_fstat;
 		/* set command and sector address */
 		result = kinetis_ftfx_command(bank, FTFx_CMD_SECTERASE, bank->base + bank->sectors[i].offset,
-					      0, 0, 0, 0,  0, 0, 0, 0,  &ftfx_fstat);
+				0, 0, 0, 0,  0, 0, 0, 0,  &ftfx_fstat);
 
 		if (result != ERROR_OK) {
 			LOG_WARNING("erase sector %d failed", i);
@@ -321,23 +863,30 @@ static int kinetis_erase(struct flash_bank *bank, int first, int last)
 	return ERROR_OK;
 }
 
-static int kinetis_write(struct flash_bank *bank, uint8_t *buffer,
+static int kinetis_write(struct flash_bank *bank, const uint8_t *buffer,
 			 uint32_t offset, uint32_t count)
 {
 	unsigned int i, result, fallback = 0;
 	uint8_t buf[8];
 	uint32_t wc;
 	struct kinetis_flash_bank *kinfo = bank->driver_priv;
+	uint8_t *new_buffer = NULL;
 
 	if (bank->target->state != TARGET_HALTED) {
 		LOG_ERROR("Target not halted");
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
-	if (kinfo->flash_class == FC_FLEX_NVM) {
+	if (kinfo->klxx) {
+		/* fallback to longword write */
+		fallback = 1;
+		LOG_WARNING("Kinetis L Series supports Program Longword execution only.");
+		LOG_DEBUG("flash write into PFLASH @08%" PRIX32, offset);
+
+	} else if (kinfo->flash_class == FC_FLEX_NVM) {
 		uint8_t ftfx_fstat;
 
-		LOG_DEBUG("flash write into FlexNVM @%08X", offset);
+		LOG_DEBUG("flash write into FlexNVM @%08" PRIX32, offset);
 
 		/* make flex ram available */
 		result = kinetis_ftfx_command(bank, FTFx_CMD_SETFLEXRAM, 0x00ff0000, 0, 0, 0, 0,  0, 0, 0, 0,  &ftfx_fstat);
@@ -355,11 +904,10 @@ static int kinetis_write(struct flash_bank *bank, uint8_t *buffer,
 			/* fallback to longword write */
 			fallback = 1;
 
-			LOG_WARNING("ram not ready, fallback to slow longword write (FCNFG: %02X)",
-				    buf[0]);
+			LOG_WARNING("ram not ready, fallback to slow longword write (FCNFG: %02X)", buf[0]);
 		}
 	} else {
-		LOG_DEBUG("flash write into PFLASH @08%X", offset);
+		LOG_DEBUG("flash write into PFLASH @08%" PRIX32, offset);
 	}
 
 
@@ -374,7 +922,7 @@ static int kinetis_write(struct flash_bank *bank, uint8_t *buffer,
 		unsigned prog_section_chunk_bytes = kinfo->sector_size >> 8;
 		/* assume the NVM sector size is half the FlexRAM size */
 		unsigned prog_size_bytes = MIN(kinfo->sector_size,
-					       kinetis_flash_params[kinfo->granularity].nvm_sector_size_bytes);
+				kinetis_flash_params[kinfo->granularity].nvm_sector_size_bytes);
 		for (i = 0; i < count; i += prog_size_bytes) {
 			uint8_t residual_buffer[16];
 			uint8_t ftfx_fstat;
@@ -412,12 +960,12 @@ static int kinetis_write(struct flash_bank *bank, uint8_t *buffer,
 				(void) memcpy(residual_buffer, &buffer[i+4*wc], residual_bc);
 			}
 
-			LOG_DEBUG("write section @ %08X with length %d bytes",
-				  offset + i, wc*4);
+			LOG_DEBUG("write section @ %08" PRIX32 " with length %" PRIu32 " bytes",
+				  offset + i, (uint32_t)wc*4);
 
 			/* write data to flexram as whole-words */
 			result = target_write_memory(bank->target, FLEXRAM, 4, wc,
-						     buffer + i);
+					buffer + i);
 
 			if (result != ERROR_OK) {
 				LOG_ERROR("target_write_memory failed");
@@ -427,9 +975,9 @@ static int kinetis_write(struct flash_bank *bank, uint8_t *buffer,
 			/* write the residual words to the flexram */
 			if (residual_wc) {
 				result = target_write_memory(bank->target,
-							     FLEXRAM+4*wc,
-							     4, residual_wc,
-							     residual_buffer);
+						FLEXRAM+4*wc,
+						4, residual_wc,
+						residual_buffer);
 
 				if (result != ERROR_OK) {
 					LOG_ERROR("target_write_memory failed");
@@ -439,29 +987,59 @@ static int kinetis_write(struct flash_bank *bank, uint8_t *buffer,
 
 			/* execute section-write command */
 			result = kinetis_ftfx_command(bank, FTFx_CMD_SECTWRITE, bank->base + offset + i,
-						      section_count>>8, section_count, 0, 0,
-						      0, 0, 0, 0,  &ftfx_fstat);
+					section_count>>8, section_count, 0, 0,
+					0, 0, 0, 0,  &ftfx_fstat);
 
 			if (result != ERROR_OK)
 				return ERROR_FLASH_OPERATION_FAILED;
 		}
 	}
 	/* program longword command, not supported in "SF3" devices */
-	else if (kinfo->granularity != 3) {
-		for (i = 0; i < count; i += 4) {
-			uint8_t ftfx_fstat;
+	else if ((kinfo->granularity != 3) || (kinfo->klxx)) {
 
-			LOG_DEBUG("write longword @ %08X", offset + i);
-
-			uint8_t padding[4] = {0xff, 0xff, 0xff, 0xff};
-			memcpy(padding, buffer + i, MIN(4, count-i));
-			result = kinetis_ftfx_command(bank, FTFx_CMD_LWORDPROG, bank->base + offset + i,
-						      padding[3], padding[2], padding[1], padding[0],
-						      0, 0, 0, 0,  &ftfx_fstat);
-
-			if (result != ERROR_OK)
-				return ERROR_FLASH_OPERATION_FAILED;
+		if (count & 0x3) {
+			uint32_t old_count = count;
+			count = (old_count | 3) + 1;
+			new_buffer = malloc(count);
+			if (new_buffer == NULL) {
+				LOG_ERROR("odd number of bytes to write and no memory "
+					"for padding buffer");
+				return ERROR_FAIL;
+			}
+			LOG_INFO("odd number of bytes to write (%" PRIu32 "), extending to %" PRIu32 " "
+				"and padding with 0xff", old_count, count);
+			memset(new_buffer, 0xff, count);
+			buffer = memcpy(new_buffer, buffer, old_count);
 		}
+
+		uint32_t words_remaining = count / 4;
+
+		/* try using a block write */
+		int retval = kinetis_write_block(bank, buffer, offset, words_remaining);
+
+		if (retval == ERROR_TARGET_RESOURCE_NOT_AVAILABLE) {
+			/* if block write failed (no sufficient working area),
+			 * we use normal (slow) single word accesses */
+			LOG_WARNING("couldn't use block writes, falling back to single "
+				"memory accesses");
+
+			for (i = 0; i < count; i += 4) {
+				uint8_t ftfx_fstat;
+
+				LOG_DEBUG("write longword @ %08" PRIX32, (uint32_t)(offset + i));
+
+				uint8_t padding[4] = {0xff, 0xff, 0xff, 0xff};
+				memcpy(padding, buffer + i, MIN(4, count-i));
+
+				result = kinetis_ftfx_command(bank, FTFx_CMD_LWORDPROG, bank->base + offset + i,
+						padding[3], padding[2], padding[1], padding[0],
+						0, 0, 0, 0,  &ftfx_fstat);
+
+				if (result != ERROR_OK)
+					return ERROR_FLASH_OPERATION_FAILED;
+			}
+		}
+
 	} else {
 		LOG_ERROR("Flash write strategy not implemented");
 		return ERROR_FLASH_OPERATION_FAILED;
@@ -473,33 +1051,86 @@ static int kinetis_write(struct flash_bank *bank, uint8_t *buffer,
 static int kinetis_read_part_info(struct flash_bank *bank)
 {
 	int result, i;
-	uint8_t buf[4];
 	uint32_t offset = 0;
 	uint8_t fcfg1_nvmsize, fcfg1_pfsize, fcfg1_eesize, fcfg2_pflsh;
 	uint32_t nvm_size = 0, pf_size = 0, ee_size = 0;
 	unsigned granularity, num_blocks = 0, num_pflash_blocks = 0, num_nvm_blocks = 0,
 		first_nvm_bank = 0, reassign = 0;
+	struct target *target = bank->target;
 	struct kinetis_flash_bank *kinfo = bank->driver_priv;
 
-	result = target_read_memory(bank->target, SIM_SDID, 1, 4, buf);
+	result = target_read_u32(target, SIM_SDID, &kinfo->sim_sdid);
 	if (result != ERROR_OK)
 		return result;
-	kinfo->sim_sdid = target_buffer_get_u32(bank->target, buf);
-	granularity = (kinfo->sim_sdid >> 7) & 0x03;
 
-	result = target_read_memory(bank->target, SIM_FCFG1, 1, 4, buf);
-	if (result != ERROR_OK)
-		return result;
-	kinfo->sim_fcfg1 = target_buffer_get_u32(bank->target, buf);
+	kinfo->klxx = 0;
 
-	result = target_read_memory(bank->target, SIM_FCFG2, 1, 4, buf);
+	/* K-series MCU? */
+	if ((kinfo->sim_sdid & (~KINETIS_SDID_K_SERIES_MASK)) == 0) {
+		uint32_t mcu_type = kinfo->sim_sdid & KINETIS_K_SDID_TYPE_MASK;
+
+		switch (mcu_type) {
+		case KINETIS_K_SDID_K10_M50:
+		case KINETIS_K_SDID_K20_M50:
+			/* 1kB sectors */
+			granularity = 0;
+			break;
+		case KINETIS_K_SDID_K10_M72:
+		case KINETIS_K_SDID_K20_M72:
+		case KINETIS_K_SDID_K30_M72:
+		case KINETIS_K_SDID_K30_M100:
+		case KINETIS_K_SDID_K40_M72:
+		case KINETIS_K_SDID_K40_M100:
+		case KINETIS_K_SDID_K50_M72:
+			/* 2kB sectors, 1kB FlexNVM sectors */
+			granularity = 1;
+			break;
+		case KINETIS_K_SDID_K10_M100:
+		case KINETIS_K_SDID_K20_M100:
+		case KINETIS_K_SDID_K11:
+		case KINETIS_K_SDID_K12:
+		case KINETIS_K_SDID_K21_M50:
+		case KINETIS_K_SDID_K22_M50:
+		case KINETIS_K_SDID_K51_M72:
+		case KINETIS_K_SDID_K53:
+		case KINETIS_K_SDID_K60_M100:
+			/* 2kB sectors */
+			granularity = 2;
+			break;
+		case KINETIS_K_SDID_K10_M120:
+		case KINETIS_K_SDID_K20_M120:
+		case KINETIS_K_SDID_K21_M120:
+		case KINETIS_K_SDID_K22_M120:
+		case KINETIS_K_SDID_K60_M150:
+		case KINETIS_K_SDID_K70_M150:
+			/* 4kB sectors */
+			granularity = 3;
+			break;
+		default:
+			LOG_ERROR("Unsupported K-family FAMID");
+			return ERROR_FLASH_OPER_UNSUPPORTED;
+		}
+	}
+	/* KL-series? */
+	else if ((kinfo->sim_sdid & KINETIS_KL_SDID_SERIESID_MASK) == KINETIS_KL_SDID_SERIESID_KL) {
+		kinfo->klxx = 1;
+		granularity = 0;
+	} else {
+		LOG_ERROR("MCU is unsupported");
+		return ERROR_FLASH_OPER_UNSUPPORTED;
+	}
+
+	result = target_read_u32(target, SIM_FCFG1, &kinfo->sim_fcfg1);
 	if (result != ERROR_OK)
 		return result;
-	kinfo->sim_fcfg2 = target_buffer_get_u32(bank->target, buf);
+
+	result = target_read_u32(target, SIM_FCFG2, &kinfo->sim_fcfg2);
+	if (result != ERROR_OK)
+		return result;
 	fcfg2_pflsh = (kinfo->sim_fcfg2 >> 23) & 0x01;
 
-	LOG_DEBUG("SDID: %08X FCFG1: %08X FCFG2: %08X", kinfo->sim_sdid,
-		  kinfo->sim_fcfg1, kinfo->sim_fcfg2);
+	LOG_DEBUG("SDID: 0x%08" PRIX32 " FCFG1: 0x%08" PRIX32 " FCFG2: 0x%08" PRIX32, kinfo->sim_sdid,
+			kinfo->sim_fcfg1, kinfo->sim_fcfg2);
 
 	fcfg1_nvmsize = (uint8_t)((kinfo->sim_fcfg1 >> 28) & 0x0f);
 	fcfg1_pfsize = (uint8_t)((kinfo->sim_fcfg1 >> 24) & 0x0f);
@@ -566,16 +1197,19 @@ static int kinetis_read_part_info(struct flash_bank *bank)
 		break;
 	}
 
-	LOG_DEBUG("FlexNVM: %d PFlash: %d FlexRAM: %d PFLSH: %d",
+	LOG_DEBUG("FlexNVM: %" PRIu32 " PFlash: %" PRIu32 " FlexRAM: %" PRIu32 " PFLSH: %d",
 		  nvm_size, pf_size, ee_size, fcfg2_pflsh);
+	if (kinfo->klxx)
+		num_blocks = 1;
+	else
+		num_blocks = kinetis_flash_params[granularity].num_blocks;
 
-	num_blocks = kinetis_flash_params[granularity].num_blocks;
 	num_pflash_blocks = num_blocks / (2 - fcfg2_pflsh);
 	first_nvm_bank = num_pflash_blocks;
 	num_nvm_blocks = num_blocks - num_pflash_blocks;
 
 	LOG_DEBUG("%d blocks total: %d PFlash, %d FlexNVM",
-		  num_blocks, num_pflash_blocks, num_nvm_blocks);
+			num_blocks, num_pflash_blocks, num_nvm_blocks);
 
 	/*
 	 * If the flash class is already assigned, verify the
@@ -592,8 +1226,7 @@ static int kinetis_read_part_info(struct flash_bank *bank)
 			switch (kinfo->flash_class) {
 			case FC_PFLASH:
 				if (kinfo->bank_ordinal >= first_nvm_bank) {
-					LOG_WARNING("Class mismatch, bank %d is not PFlash",
-						    bank->bank_number);
+					LOG_WARNING("Class mismatch, bank %d is not PFlash", bank->bank_number);
 					reassign = 1;
 				} else if (bank->size != (pf_size / num_pflash_blocks)) {
 					LOG_WARNING("PFlash size mismatch");
@@ -603,7 +1236,7 @@ static int kinetis_read_part_info(struct flash_bank *bank)
 					LOG_WARNING("PFlash address range mismatch");
 					reassign = 1;
 				} else if (kinfo->sector_size !=
-					 kinetis_flash_params[granularity].pflash_sector_size_bytes) {
+						kinetis_flash_params[granularity].pflash_sector_size_bytes) {
 					LOG_WARNING("PFlash sector size mismatch");
 					reassign = 1;
 				} else {
@@ -613,19 +1246,18 @@ static int kinetis_read_part_info(struct flash_bank *bank)
 				break;
 			case FC_FLEX_NVM:
 				if ((kinfo->bank_ordinal >= num_blocks) ||
-				    (kinfo->bank_ordinal < first_nvm_bank)) {
-					LOG_WARNING("Class mismatch, bank %d is not FlexNVM",
-						    bank->bank_number);
+						(kinfo->bank_ordinal < first_nvm_bank)) {
+					LOG_WARNING("Class mismatch, bank %d is not FlexNVM", bank->bank_number);
 					reassign = 1;
 				} else if (bank->size != (nvm_size / num_nvm_blocks)) {
 					LOG_WARNING("FlexNVM size mismatch");
 					reassign = 1;
 				} else if (bank->base !=
-					 (0x10000000 + bank->size * kinfo->bank_ordinal)) {
+						(0x10000000 + bank->size * kinfo->bank_ordinal)) {
 					LOG_WARNING("FlexNVM address range mismatch");
 					reassign = 1;
 				} else if (kinfo->sector_size !=
-					 kinetis_flash_params[granularity].nvm_sector_size_bytes) {
+						kinetis_flash_params[granularity].nvm_sector_size_bytes) {
 					LOG_WARNING("FlexNVM sector size mismatch");
 					reassign = 1;
 				} else {
@@ -635,8 +1267,7 @@ static int kinetis_read_part_info(struct flash_bank *bank)
 				break;
 			case FC_FLEX_RAM:
 				if (kinfo->bank_ordinal != num_blocks) {
-					LOG_WARNING("Class mismatch, bank %d is not FlexRAM",
-						    bank->bank_number);
+					LOG_WARNING("Class mismatch, bank %d is not FlexRAM", bank->bank_number);
 					reassign = 1;
 				} else if (bank->size != ee_size) {
 					LOG_WARNING("FlexRAM size mismatch");
@@ -649,8 +1280,7 @@ static int kinetis_read_part_info(struct flash_bank *bank)
 					LOG_WARNING("FlexRAM sector size mismatch");
 					reassign = 1;
 				} else {
-					LOG_DEBUG("FlexRAM bank %d already configured okay",
-						  kinfo->bank_ordinal);
+					LOG_DEBUG("FlexRAM bank %d already configured okay", kinfo->bank_ordinal);
 				}
 				break;
 
@@ -689,7 +1319,7 @@ static int kinetis_read_part_info(struct flash_bank *bank)
 		return ERROR_FLASH_OPER_UNSUPPORTED;
 	} else {
 		LOG_ERROR("Cannot determine parameters for bank %d, only %d banks on device",
-			  bank->bank_number, num_blocks);
+				bank->bank_number, num_blocks);
 		return ERROR_FLASH_BANK_INVALID;
 	}
 
@@ -797,26 +1427,63 @@ static int kinetis_blank_check(struct flash_bank *bank)
 	return ERROR_OK;
 }
 
-static int kinetis_flash_read(struct flash_bank *bank,
-			      uint8_t *buffer, uint32_t offset, uint32_t count)
-{
-	LOG_WARNING("kinetis_flash_read not supported yet");
+static const struct command_registration kinetis_securtiy_command_handlers[] = {
+	{
+		.name = "check_security",
+		.mode = COMMAND_EXEC,
+		.help = "",
+		.usage = "",
+		.handler = kinetis_check_flash_security_status,
+	},
+	{
+		.name = "mass_erase",
+		.mode = COMMAND_EXEC,
+		.help = "",
+		.usage = "",
+		.handler = kinetis_mdm_mass_erase,
+	},
+	{
+		.name = "test_securing",
+		.mode = COMMAND_EXEC,
+		.help = "",
+		.usage = "",
+		.handler = kinetis_securing_test,
+	},
+	COMMAND_REGISTRATION_DONE
+};
 
-	if (bank->target->state != TARGET_HALTED) {
-		LOG_ERROR("Target not halted");
-		return ERROR_TARGET_NOT_HALTED;
-	}
+static const struct command_registration kinetis_exec_command_handlers[] = {
+	{
+		.name = "mdm",
+		.mode = COMMAND_ANY,
+		.help = "",
+		.usage = "",
+		.chain = kinetis_securtiy_command_handlers,
+	},
+	COMMAND_REGISTRATION_DONE
+};
 
-	return ERROR_FLASH_OPERATION_FAILED;
-}
+static const struct command_registration kinetis_command_handler[] = {
+	{
+		.name = "kinetis",
+		.mode = COMMAND_ANY,
+		.help = "kinetis NAND flash controller commands",
+		.usage = "",
+		.chain = kinetis_exec_command_handlers,
+	},
+	COMMAND_REGISTRATION_DONE
+};
+
+
 
 struct flash_driver kinetis_flash = {
 	.name = "kinetis",
+	.commands = kinetis_command_handler,
 	.flash_bank_command = kinetis_flash_bank_command,
 	.erase = kinetis_erase,
 	.protect = kinetis_protect,
 	.write = kinetis_write,
-	.read = kinetis_flash_read,
+	.read = default_flash_read,
 	.probe = kinetis_probe,
 	.auto_probe = kinetis_auto_probe,
 	.erase_check = kinetis_blank_check,

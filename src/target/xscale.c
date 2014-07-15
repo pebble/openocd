@@ -513,8 +513,6 @@ done:
 static int xscale_send(struct target *target, const uint8_t *buffer, int count, int size)
 {
 	struct xscale_common *xscale = target_to_xscale(target);
-	uint32_t t[3];
-	int bits[3];
 	int retval;
 	int done_count = 0;
 
@@ -522,37 +520,45 @@ static int xscale_send(struct target *target, const uint8_t *buffer, int count, 
 		XSCALE_DBGRX << xscale->xscale_variant,
 		TAP_IDLE);
 
-	bits[0] = 3;
-	t[0] = 0;
-	bits[1] = 32;
-	t[2] = 1;
-	bits[2] = 1;
+	static const uint8_t t0;
+	uint8_t t1[4];
+	static const uint8_t t2 = 1;
+	struct scan_field fields[3] = {
+			{ .num_bits = 3, .out_value = &t0 },
+			{ .num_bits = 32, .out_value = t1 },
+			{ .num_bits = 1, .out_value = &t2 },
+	};
+
 	int endianness = target->endianness;
 	while (done_count++ < count) {
+		uint32_t t;
+
 		switch (size) {
 			case 4:
 				if (endianness == TARGET_LITTLE_ENDIAN)
-					t[1] = le_to_h_u32(buffer);
+					t = le_to_h_u32(buffer);
 				else
-					t[1] = be_to_h_u32(buffer);
+					t = be_to_h_u32(buffer);
 				break;
 			case 2:
 				if (endianness == TARGET_LITTLE_ENDIAN)
-					t[1] = le_to_h_u16(buffer);
+					t = le_to_h_u16(buffer);
 				else
-					t[1] = be_to_h_u16(buffer);
+					t = be_to_h_u16(buffer);
 				break;
 			case 1:
-				t[1] = buffer[0];
+				t = buffer[0];
 				break;
 			default:
 				LOG_ERROR("BUG: size neither 4, 2 nor 1");
 				return ERROR_COMMAND_SYNTAX_ERROR;
 		}
-		jtag_add_dr_out(target->tap,
+
+		buf_set_u32(t1, 0, 32, t);
+
+		jtag_add_dr_scan(target->tap,
 			3,
-			bits,
-			t,
+			fields,
 			TAP_IDLE);
 		buffer += size;
 	}
@@ -1447,6 +1453,13 @@ static int xscale_assert_reset(struct target *target)
 	LOG_DEBUG("target->state: %s",
 		target_state_name(target));
 
+	/* assert reset */
+	jtag_add_reset(0, 1);
+
+	/* sleep 1ms, to be sure we fulfill any requirements */
+	jtag_add_sleep(1000);
+	jtag_execute_queue();
+
 	/* select DCSR instruction (set endstate to R-T-I to ensure we don't
 	 * end up in T-L-R, which would reset JTAG
 	 */
@@ -1461,13 +1474,6 @@ static int xscale_assert_reset(struct target *target)
 
 	/* select BYPASS, because having DCSR selected caused problems on the PXA27x */
 	xscale_jtag_set_instr(target->tap, ~0, TAP_IDLE);
-	jtag_execute_queue();
-
-	/* assert reset */
-	jtag_add_reset(0, 1);
-
-	/* sleep 1ms, to be sure we fulfill any requirements */
-	jtag_add_sleep(1000);
 	jtag_execute_queue();
 
 	target->state = TARGET_RESET;
@@ -1815,8 +1821,10 @@ static int xscale_read_memory(struct target *target, uint32_t address,
 	/* receive data from target (count times 32-bit words in host endianness) */
 	buf32 = malloc(4 * count);
 	retval = xscale_receive(target, buf32, count);
-	if (retval != ERROR_OK)
+	if (retval != ERROR_OK) {
+		free(buf32);
 		return retval;
+	}
 
 	/* extract data from host-endian buffer into byte stream */
 	for (i = 0; i < count; i++) {
@@ -3218,28 +3226,66 @@ COMMAND_HANDLER(xscale_handle_idcache_command)
 	return ERROR_OK;
 }
 
+static const struct {
+	char name[15];
+	unsigned mask;
+} vec_ids[] = {
+	{ "fiq",		DCSR_TF, },
+	{ "irq",		DCSR_TI, },
+	{ "dabt",		DCSR_TD, },
+	{ "pabt",		DCSR_TA, },
+	{ "swi",		DCSR_TS, },
+	{ "undef",		DCSR_TU, },
+	{ "reset",		DCSR_TR, },
+};
+
 COMMAND_HANDLER(xscale_handle_vector_catch_command)
 {
 	struct target *target = get_current_target(CMD_CTX);
 	struct xscale_common *xscale = target_to_xscale(target);
 	int retval;
+	uint32_t dcsr_value;
+	uint32_t catch = 0;
+	struct reg *dcsr_reg = &xscale->reg_cache->reg_list[XSCALE_DCSR];
 
 	retval = xscale_verify_pointer(CMD_CTX, xscale);
 	if (retval != ERROR_OK)
 		return retval;
 
-	if (CMD_ARGC < 1)
-		return ERROR_COMMAND_SYNTAX_ERROR;
-	else {
-		COMMAND_PARSE_NUMBER(u8, CMD_ARGV[0], xscale->vector_catch);
-		buf_set_u32(xscale->reg_cache->reg_list[XSCALE_DCSR].value,
-			16,
-			8,
-			xscale->vector_catch);
+	dcsr_value = buf_get_u32(dcsr_reg->value, 0, 32);
+	if (CMD_ARGC > 0) {
+		if (CMD_ARGC == 1) {
+			if (strcmp(CMD_ARGV[0], "all") == 0) {
+				catch = DCSR_TRAP_MASK;
+				CMD_ARGC--;
+			} else if (strcmp(CMD_ARGV[0], "none") == 0) {
+				catch = 0;
+				CMD_ARGC--;
+			}
+		}
+		while (CMD_ARGC-- > 0) {
+			unsigned i;
+			for (i = 0; i < ARRAY_SIZE(vec_ids); i++) {
+				if (strcmp(CMD_ARGV[CMD_ARGC], vec_ids[i].name))
+					continue;
+				catch |= vec_ids[i].mask;
+				break;
+			}
+			if (i == ARRAY_SIZE(vec_ids)) {
+				LOG_ERROR("No vector '%s'", CMD_ARGV[CMD_ARGC]);
+				return ERROR_COMMAND_SYNTAX_ERROR;
+			}
+		}
+		*(uint32_t *)(dcsr_reg->value) &= ~DCSR_TRAP_MASK;
+		*(uint32_t *)(dcsr_reg->value) |= catch;
 		xscale_write_dcsr(target, -1, -1);
 	}
 
-	command_print(CMD_CTX, "vector catch mask: 0x%2.2x", xscale->vector_catch);
+	dcsr_value = buf_get_u32(dcsr_reg->value, 0, 32);
+	for (unsigned i = 0; i < ARRAY_SIZE(vec_ids); i++) {
+		command_print(CMD_CTX, "%15s: %s", vec_ids[i].name,
+			(dcsr_value & vec_ids[i].mask) ? "catch" : "ignore");
+	}
 
 	return ERROR_OK;
 }
@@ -3350,7 +3396,7 @@ COMMAND_HANDLER(xscale_handle_trace_buffer_command)
 
 	if (xscale->trace.mode != XSCALE_TRACE_DISABLED) {
 		char fill_string[12];
-		sprintf(fill_string, "fill %" PRId32, xscale->trace.buffer_fill);
+		sprintf(fill_string, "fill %d", xscale->trace.buffer_fill);
 		command_print(CMD_CTX, "trace buffer enabled (%s)",
 			(xscale->trace.mode == XSCALE_TRACE_FILL)
 			? fill_string : "wrap");
@@ -3585,9 +3631,9 @@ static const struct command_registration xscale_exec_command_handlers[] = {
 		.name = "vector_catch",
 		.handler = xscale_handle_vector_catch_command,
 		.mode = COMMAND_EXEC,
-		.help = "set or display 8-bit mask of vectors "
+		.help = "set or display mask of vectors "
 			"that should trigger debug entry",
-		.usage = "[mask]",
+		.usage = "['all'|'none'|'fiq'|'irq'|'dabt'|'pabt'|'swi'|'undef'|'reset']",
 	},
 	{
 		.name = "vector_table",
@@ -3675,15 +3721,12 @@ struct target_type xscale_target = {
 	.poll = xscale_poll,
 	.arch_state = xscale_arch_state,
 
-	.target_request_data = NULL,
-
 	.halt = xscale_halt,
 	.resume = xscale_resume,
 	.step = xscale_step,
 
 	.assert_reset = xscale_assert_reset,
 	.deassert_reset = xscale_deassert_reset,
-	.soft_reset_halt = NULL,
 
 	/* REVISIT on some cores, allow exporting iwmmxt registers ... */
 	.get_gdb_reg_list = arm_get_gdb_reg_list,

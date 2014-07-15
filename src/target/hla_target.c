@@ -66,7 +66,7 @@ static int adapter_load_core_reg_u32(struct target *target,
 	switch (num) {
 	case 0 ... 18:
 		/* read a normal core register */
-		retval = adapter->layout->api->read_reg(adapter->fd, num, value);
+		retval = adapter->layout->api->read_reg(adapter->handle, num, value);
 
 		if (retval != ERROR_OK) {
 			LOG_ERROR("JTAG failure %i", retval);
@@ -114,7 +114,7 @@ static int adapter_load_core_reg_u32(struct target *target,
 		 * in one Debug Core register.  So say r0 and r2 docs;
 		 * it was removed from r1 docs, but still works.
 		 */
-		retval = adapter->layout->api->read_reg(adapter->fd, 20, value);
+		retval = adapter->layout->api->read_reg(adapter->handle, 20, value);
 		if (retval != ERROR_OK)
 			return retval;
 
@@ -157,25 +157,13 @@ static int adapter_store_core_reg_u32(struct target *target,
 
 	LOG_DEBUG("%s", __func__);
 
-#ifdef ARMV7_GDB_HACKS
-	/* If the LR register is being modified, make sure it will put us
-	 * in "thumb" mode, or an INVSTATE exception will occur. This is a
-	 * hack to deal with the fact that gdb will sometimes "forge"
-	 * return addresses, and doesn't set the LSB correctly (i.e., when
-	 * printing expressions containing function calls, it sets LR = 0.)
-	 * Valid exception return codes have bit 0 set too.
-	 */
-	if (num == ARMV7M_R14)
-		value |= 0x01;
-#endif
-
 	/* NOTE:  we "know" here that the register identifiers used
 	 * in the v7m header match the Cortex-M3 Debug Core Register
 	 * Selector values for R0..R15, xPSR, MSP, and PSP.
 	 */
 	switch (num) {
 	case 0 ... 18:
-		retval = adapter->layout->api->write_reg(adapter->fd, num, value);
+		retval = adapter->layout->api->write_reg(adapter->handle, num, value);
 
 		if (retval != ERROR_OK) {
 			struct reg *r;
@@ -226,7 +214,7 @@ static int adapter_store_core_reg_u32(struct target *target,
 		 * it was removed from r1 docs, but still works.
 		 */
 
-		adapter->layout->api->read_reg(adapter->fd, 20, &reg);
+		adapter->layout->api->read_reg(adapter->handle, 20, &reg);
 
 		switch (num) {
 		case ARMV7M_PRIMASK:
@@ -246,7 +234,7 @@ static int adapter_store_core_reg_u32(struct target *target,
 			break;
 		}
 
-		adapter->layout->api->write_reg(adapter->fd, 20, reg);
+		adapter->layout->api->write_reg(adapter->handle, 20, reg);
 
 		LOG_DEBUG("write special reg %i value 0x%" PRIx32 " ", (int)num, value);
 		break;
@@ -271,8 +259,8 @@ static int adapter_examine_debug_reason(struct target *target)
 static int hl_dcc_read(struct hl_interface_s *hl_if, uint8_t *value, uint8_t *ctrl)
 {
 	uint16_t dcrdr;
-	int retval = hl_if->layout->api->read_mem8(hl_if->fd,
-								DCB_DCRDR, sizeof(dcrdr), (uint8_t *)&dcrdr);
+	int retval = hl_if->layout->api->read_mem(hl_if->handle,
+			DCB_DCRDR, 1, sizeof(dcrdr), (uint8_t *)&dcrdr);
 	if (retval == ERROR_OK) {
 	    *ctrl = (uint8_t)dcrdr;
 	    *value = (uint8_t)(dcrdr >> 8);
@@ -284,8 +272,7 @@ static int hl_dcc_read(struct hl_interface_s *hl_if, uint8_t *value, uint8_t *ct
 			 * to signify we have read data */
 			/* atomically clear just the byte containing the busy bit */
 			static const uint8_t zero;
-			retval = hl_if->layout->api->write_mem8(
-						hl_if->fd, DCB_DCRDR, 1, &zero);
+			retval = hl_if->layout->api->write_mem(hl_if->handle, DCB_DCRDR, 1, 1, &zero);
 		}
 	}
 	return retval;
@@ -343,14 +330,14 @@ static int hl_handle_target_request(void *priv)
 }
 
 static int adapter_init_arch_info(struct target *target,
-				       struct cortex_m3_common *cortex_m3,
+				       struct cortex_m_common *cortex_m,
 				       struct jtag_tap *tap)
 {
 	struct armv7m_common *armv7m;
 
 	LOG_DEBUG("%s", __func__);
 
-	armv7m = &cortex_m3->armv7m;
+	armv7m = &cortex_m->armv7m;
 	armv7m_init_arch_info(target, armv7m);
 
 	armv7m->load_core_reg_u32 = adapter_load_core_reg_u32;
@@ -379,12 +366,12 @@ static int adapter_target_create(struct target *target,
 {
 	LOG_DEBUG("%s", __func__);
 
-	struct cortex_m3_common *cortex_m3 = calloc(1, sizeof(struct cortex_m3_common));
+	struct cortex_m_common *cortex_m = calloc(1, sizeof(struct cortex_m_common));
 
-	if (!cortex_m3)
+	if (!cortex_m)
 		return ERROR_COMMAND_SYNTAX_ERROR;
 
-	adapter_init_arch_info(target, cortex_m3, target->tap);
+	adapter_init_arch_info(target, cortex_m, target->tap);
 
 	return ERROR_OK;
 }
@@ -425,9 +412,9 @@ static int adapter_debug_entry(struct target *target)
 	adapter_load_context(target);
 
 	/* make sure we clear the vector catch bit */
-	adapter->layout->api->write_debug_reg(adapter->fd, DCB_DEMCR, TRCENA);
+	adapter->layout->api->write_debug_reg(adapter->handle, DCB_DEMCR, TRCENA);
 
-	r = arm->core_cache->reg_list + ARMV7M_xPSR;
+	r = arm->cpsr;
 	xPSR = buf_get_u32(r->value, 0, 32);
 
 	/* Are we in an exception handler */
@@ -469,18 +456,19 @@ static int adapter_poll(struct target *target)
 	struct armv7m_common *armv7m = target_to_armv7m(target);
 	enum target_state prev_target_state = target->state;
 
-	state = adapter->layout->api->state(adapter->fd);
+	state = adapter->layout->api->state(adapter->handle);
 
 	if (state == TARGET_UNKNOWN) {
 		LOG_ERROR("jtag status contains invalid mode value - communication failure");
 		return ERROR_TARGET_FAILURE;
 	}
 
-	if (target->state == state)
+	if (prev_target_state == state)
 		return ERROR_OK;
 
+	target->state = state;
+
 	if (state == TARGET_HALTED) {
-		target->state = state;
 
 		int retval = adapter_debug_entry(target);
 		if (retval != ERROR_OK)
@@ -495,7 +483,7 @@ static int adapter_poll(struct target *target)
 			target_call_event_callbacks(target, TARGET_EVENT_HALTED);
 		}
 
-		LOG_DEBUG("halted: PC: 0x%08x", buf_get_u32(armv7m->arm.pc->value, 0, 32));
+		LOG_DEBUG("halted: PC: 0x%08" PRIx32, buf_get_u32(armv7m->arm.pc->value, 0, 32));
 	}
 
 	return ERROR_OK;
@@ -517,22 +505,22 @@ static int adapter_assert_reset(struct target *target)
 	if ((jtag_reset_config & RESET_HAS_SRST) &&
 	    (jtag_reset_config & RESET_SRST_NO_GATING)) {
 		jtag_add_reset(0, 1);
-		res = adapter->layout->api->assert_srst(adapter->fd, 0);
+		res = adapter->layout->api->assert_srst(adapter->handle, 0);
 		srst_asserted = true;
 	}
 
-	adapter->layout->api->write_debug_reg(adapter->fd, DCB_DHCSR, DBGKEY|C_DEBUGEN);
+	adapter->layout->api->write_debug_reg(adapter->handle, DCB_DHCSR, DBGKEY|C_DEBUGEN);
 
 	/* only set vector catch if halt is requested */
 	if (target->reset_halt)
-		adapter->layout->api->write_debug_reg(adapter->fd, DCB_DEMCR, TRCENA|VC_CORERESET);
+		adapter->layout->api->write_debug_reg(adapter->handle, DCB_DEMCR, TRCENA|VC_CORERESET);
 	else
-		adapter->layout->api->write_debug_reg(adapter->fd, DCB_DEMCR, TRCENA);
+		adapter->layout->api->write_debug_reg(adapter->handle, DCB_DEMCR, TRCENA);
 
 	if (jtag_reset_config & RESET_HAS_SRST) {
 		if (!srst_asserted) {
 			jtag_add_reset(0, 1);
-			res = adapter->layout->api->assert_srst(adapter->fd, 0);
+			res = adapter->layout->api->assert_srst(adapter->handle, 0);
 		}
 		if (res == ERROR_COMMAND_NOTFOUND)
 			LOG_ERROR("Hardware srst not supported, falling back to software reset");
@@ -544,10 +532,10 @@ static int adapter_assert_reset(struct target *target)
 
 	if (use_srst_fallback) {
 		/* stlink v1 api does not support hardware srst, so we use a software reset fallback */
-		adapter->layout->api->write_debug_reg(adapter->fd, NVIC_AIRCR, AIRCR_VECTKEY | AIRCR_SYSRESETREQ);
+		adapter->layout->api->write_debug_reg(adapter->handle, NVIC_AIRCR, AIRCR_VECTKEY | AIRCR_SYSRESETREQ);
 	}
 
-	res = adapter->layout->api->reset(adapter->fd);
+	res = adapter->layout->api->reset(adapter->handle);
 
 	if (res != ERROR_OK)
 		return res;
@@ -574,7 +562,7 @@ static int adapter_deassert_reset(struct target *target)
 	LOG_DEBUG("%s", __func__);
 
 	if (jtag_reset_config & RESET_HAS_SRST)
-		adapter->layout->api->assert_srst(adapter->fd, 1);
+		adapter->layout->api->assert_srst(adapter->handle, 1);
 
 	/* virtual deassert reset, we need it for the internal
 	 * jtag state machine
@@ -584,12 +572,6 @@ static int adapter_deassert_reset(struct target *target)
 	target->savedDCRDR = 0;  /* clear both DCC busy bits on initial resume */
 
 	return target->reset_halt ? ERROR_OK : target_resume(target, 1, 0, 0, 0);
-}
-
-static int adapter_soft_reset_halt(struct target *target)
-{
-	LOG_DEBUG("%s", __func__);
-	return ERROR_OK;
 }
 
 static int adapter_halt(struct target *target)
@@ -607,7 +589,7 @@ static int adapter_halt(struct target *target)
 	if (target->state == TARGET_UNKNOWN)
 		LOG_WARNING("target was in unknown state when halt was requested");
 
-	res = adapter->layout->api->halt(adapter->fd);
+	res = adapter->layout->api->halt(adapter->handle);
 
 	if (res != ERROR_OK)
 		return res;
@@ -628,7 +610,7 @@ static int adapter_resume(struct target *target, int current,
 	struct breakpoint *breakpoint = NULL;
 	struct reg *pc;
 
-	LOG_DEBUG("%s %d 0x%08x %d %d", __func__, current, address,
+	LOG_DEBUG("%s %d 0x%08" PRIx32 " %d %d", __func__, current, address,
 			handle_breakpoints, debug_execution);
 
 	if (target->state != TARGET_HALTED) {
@@ -638,8 +620,8 @@ static int adapter_resume(struct target *target, int current,
 
 	if (!debug_execution) {
 		target_free_all_working_areas(target);
-		cortex_m3_enable_breakpoints(target);
-		cortex_m3_enable_watchpoints(target);
+		cortex_m_enable_breakpoints(target);
+		cortex_m_enable_watchpoints(target);
 	}
 
 	pc = armv7m->arm.pc;
@@ -676,21 +658,21 @@ static int adapter_resume(struct target *target, int current,
 		/* Single step past breakpoint at current address */
 		breakpoint = breakpoint_find(target, resume_pc);
 		if (breakpoint) {
-			LOG_DEBUG("unset breakpoint at 0x%8.8" PRIx32 " (ID: %d)",
+			LOG_DEBUG("unset breakpoint at 0x%8.8" PRIx32 " (ID: %" PRIu32 ")",
 					breakpoint->address,
 					breakpoint->unique_id);
-			cortex_m3_unset_breakpoint(target, breakpoint);
+			cortex_m_unset_breakpoint(target, breakpoint);
 
-			res = adapter->layout->api->step(adapter->fd);
+			res = adapter->layout->api->step(adapter->handle);
 
 			if (res != ERROR_OK)
 				return res;
 
-			cortex_m3_set_breakpoint(target, breakpoint);
+			cortex_m_set_breakpoint(target, breakpoint);
 		}
 	}
 
-	res = adapter->layout->api->run(adapter->fd);
+	res = adapter->layout->api->run(adapter->handle);
 
 	if (res != ERROR_OK)
 		return res;
@@ -737,7 +719,7 @@ static int adapter_step(struct target *target, int current,
 	if (handle_breakpoints) {
 		breakpoint = breakpoint_find(target, pc_value);
 		if (breakpoint)
-			cortex_m3_unset_breakpoint(target, breakpoint);
+			cortex_m_unset_breakpoint(target, breakpoint);
 	}
 
 	armv7m_maybe_skip_bkpt_inst(target, &bkpt_inst_found);
@@ -753,7 +735,7 @@ static int adapter_step(struct target *target, int current,
 
 	target_call_event_callbacks(target, TARGET_EVENT_RESUMED);
 
-	res = adapter->layout->api->step(adapter->fd);
+	res = adapter->layout->api->step(adapter->handle);
 
 	if (res != ERROR_OK)
 		return res;
@@ -762,12 +744,12 @@ static int adapter_step(struct target *target, int current,
 	register_cache_invalidate(armv7m->arm.core_cache);
 
 	if (breakpoint)
-		cortex_m3_set_breakpoint(target, breakpoint);
+		cortex_m_set_breakpoint(target, breakpoint);
 
 	adapter_debug_entry(target);
 	target_call_event_callbacks(target, TARGET_EVENT_HALTED);
 
-	LOG_INFO("halted: PC: 0x%08x", buf_get_u32(armv7m->arm.pc->value, 0, 32));
+	LOG_INFO("halted: PC: 0x%08" PRIx32, buf_get_u32(armv7m->arm.pc->value, 0, 32));
 
 	return ERROR_OK;
 }
@@ -777,47 +759,13 @@ static int adapter_read_memory(struct target *target, uint32_t address,
 		uint8_t *buffer)
 {
 	struct hl_interface_s *adapter = target_to_adapter(target);
-	int res;
-	uint32_t buffer_threshold = (adapter->param.max_buffer / 4);
-	uint32_t addr_increment = 4;
-	uint32_t c;
 
 	if (!count || !buffer)
 		return ERROR_COMMAND_SYNTAX_ERROR;
 
-	LOG_DEBUG("%s 0x%08x %d %d", __func__, address, size, count);
+	LOG_DEBUG("%s 0x%08" PRIx32 " %" PRIu32 " %" PRIu32, __func__, address, size, count);
 
-	/* prepare byte count, buffer threshold
-	 * and address increment for none 32bit access
-	 */
-	if (size != 4) {
-		count *= size;
-		buffer_threshold = (adapter->param.max_buffer / 4) / 2;
-		addr_increment = 1;
-	}
-
-	while (count) {
-		if (count > buffer_threshold)
-			c = buffer_threshold;
-		else
-			c = count;
-
-		if (size != 4)
-			res = adapter->layout->api->read_mem8(adapter->fd,
-					address, c, buffer);
-		else
-			res = adapter->layout->api->read_mem32(adapter->fd,
-					address, c, buffer);
-
-		if (res != ERROR_OK)
-			return res;
-
-		address += (c * addr_increment);
-		buffer += (c * addr_increment);
-		count -= c;
-	}
-
-	return ERROR_OK;
+	return adapter->layout->api->read_mem(adapter->handle, address, size, count, buffer);
 }
 
 static int adapter_write_memory(struct target *target, uint32_t address,
@@ -825,47 +773,13 @@ static int adapter_write_memory(struct target *target, uint32_t address,
 		const uint8_t *buffer)
 {
 	struct hl_interface_s *adapter = target_to_adapter(target);
-	int res;
-	uint32_t buffer_threshold = (adapter->param.max_buffer / 4);
-	uint32_t addr_increment = 4;
-	uint32_t c;
 
 	if (!count || !buffer)
 		return ERROR_COMMAND_SYNTAX_ERROR;
 
-	LOG_DEBUG("%s 0x%08x %d %d", __func__, address, size, count);
+	LOG_DEBUG("%s 0x%08" PRIx32 " %" PRIu32 " %" PRIu32, __func__, address, size, count);
 
-	/* prepare byte count, buffer threshold
-	 * and address increment for none 32bit access
-	 */
-	if (size != 4) {
-		count *= size;
-		buffer_threshold = (adapter->param.max_buffer / 4) / 2;
-		addr_increment = 1;
-	}
-
-	while (count) {
-		if (count > buffer_threshold)
-			c = buffer_threshold;
-		else
-			c = count;
-
-		if (size != 4)
-			res = adapter->layout->api->write_mem8(adapter->fd,
-					address, c, buffer);
-		else
-			res = adapter->layout->api->write_mem32(adapter->fd,
-					address, c, buffer);
-
-		if (res != ERROR_OK)
-			return res;
-
-		address += (c * addr_increment);
-		buffer += (c * addr_increment);
-		count -= c;
-	}
-
-	return ERROR_OK;
+	return adapter->layout->api->write_mem(adapter->handle, address, size, count, buffer);
 }
 
 static const struct command_registration adapter_command_handlers[] = {
@@ -881,7 +795,7 @@ struct target_type hla_target = {
 
 	.init_target = adapter_init_target,
 	.target_create = adapter_target_create,
-	.examine = cortex_m3_examine,
+	.examine = cortex_m_examine,
 	.commands = adapter_command_handlers,
 
 	.poll = adapter_poll,
@@ -890,7 +804,6 @@ struct target_type hla_target = {
 	.target_request_data = hl_target_request_data,
 	.assert_reset = adapter_assert_reset,
 	.deassert_reset = adapter_deassert_reset,
-	.soft_reset_halt = adapter_soft_reset_halt,
 
 	.halt = adapter_halt,
 	.resume = adapter_resume,
@@ -907,8 +820,8 @@ struct target_type hla_target = {
 	.start_algorithm = armv7m_start_algorithm,
 	.wait_algorithm = armv7m_wait_algorithm,
 
-	.add_breakpoint = cortex_m3_add_breakpoint,
-	.remove_breakpoint = cortex_m3_remove_breakpoint,
-	.add_watchpoint = cortex_m3_add_watchpoint,
-	.remove_watchpoint = cortex_m3_remove_watchpoint,
+	.add_breakpoint = cortex_m_add_breakpoint,
+	.remove_breakpoint = cortex_m_remove_breakpoint,
+	.add_watchpoint = cortex_m_add_watchpoint,
+	.remove_watchpoint = cortex_m_remove_watchpoint,
 };

@@ -89,7 +89,6 @@ NAND_DEVICE_COMMAND_HANDLER(mxc_nand_device_command)
 {
 	struct mxc_nf_controller *mxc_nf_info;
 	int hwecc_needed;
-	int x;
 
 	mxc_nf_info = malloc(sizeof(struct mxc_nf_controller));
 	if (mxc_nf_info == NULL) {
@@ -147,14 +146,6 @@ NAND_DEVICE_COMMAND_HANDLER(mxc_nand_device_command)
 		mxc_nf_info->flags.biswap_enabled = 1;
 	}
 
-	/*
-	 * testing host endianness
-	 */
-	x = 1;
-	if (*(char *) &x == 1)
-		mxc_nf_info->flags.host_little_endian = 1;
-	else
-		mxc_nf_info->flags.host_little_endian = 0;
 	return ERROR_OK;
 }
 
@@ -543,7 +534,7 @@ static int mxc_write_page(struct nand_device *nand, uint32_t page,
 		swap2 = (swap1 << 8) | (swap2 & 0xFF);
 		target_write_u16(target, MXC_NF_MAIN_BUFFER3 + 464, new_swap1);
 		if (nfc_is_v1())
-			target_write_u16(target, MXC_NF_V1_SPARE_BUFFER3, swap2);
+			target_write_u16(target, MXC_NF_V1_SPARE_BUFFER3 + 4, swap2);
 		else
 			target_write_u16(target, MXC_NF_V2_SPARE_BUFFER3, swap2);
 	}
@@ -662,7 +653,7 @@ static int mxc_read_page(struct nand_device *nand, uint32_t page,
 		/* BI-swap -  work-around of mxc NFC for NAND device with page == 2k */
 		target_read_u16(target, MXC_NF_MAIN_BUFFER3 + 464, &swap1);
 		if (nfc_is_v1())
-			SPARE_BUFFER3 = MXC_NF_V1_SPARE_BUFFER3;
+			SPARE_BUFFER3 = MXC_NF_V1_SPARE_BUFFER3 + 4;
 		else
 			SPARE_BUFFER3 = MXC_NF_V2_SPARE_BUFFER3;
 		target_read_u16(target, SPARE_BUFFER3, &swap2);

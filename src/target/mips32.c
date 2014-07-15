@@ -35,58 +35,53 @@
 #include "algorithm.h"
 #include "register.h"
 
-static char *mips32_core_reg_list[] = {
-	"zero", "at", "v0", "v1", "a0", "a1", "a2", "a3",
-	"t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7",
-	"s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7",
-	"t8", "t9", "k0", "k1", "gp", "sp", "fp", "ra",
-	"status", "lo", "hi", "badvaddr", "cause", "pc"
-};
-
 static const char *mips_isa_strings[] = {
 	"MIPS32", "MIPS16e"
 };
 
-static struct mips32_core_reg mips32_core_reg_list_arch_info[MIPS32NUMCOREREGS] = {
-	{0, NULL, NULL},
-	{1, NULL, NULL},
-	{2, NULL, NULL},
-	{3, NULL, NULL},
-	{4, NULL, NULL},
-	{5, NULL, NULL},
-	{6, NULL, NULL},
-	{7, NULL, NULL},
-	{8, NULL, NULL},
-	{9, NULL, NULL},
-	{10, NULL, NULL},
-	{11, NULL, NULL},
-	{12, NULL, NULL},
-	{13, NULL, NULL},
-	{14, NULL, NULL},
-	{15, NULL, NULL},
-	{16, NULL, NULL},
-	{17, NULL, NULL},
-	{18, NULL, NULL},
-	{19, NULL, NULL},
-	{20, NULL, NULL},
-	{21, NULL, NULL},
-	{22, NULL, NULL},
-	{23, NULL, NULL},
-	{24, NULL, NULL},
-	{25, NULL, NULL},
-	{26, NULL, NULL},
-	{27, NULL, NULL},
-	{28, NULL, NULL},
-	{29, NULL, NULL},
-	{30, NULL, NULL},
-	{31, NULL, NULL},
+static const struct {
+	unsigned id;
+	const char *name;
+} mips32_regs[MIPS32NUMCOREREGS] = {
+	{ 0, "zero", },
+	{ 1, "at", },
+	{ 2, "v0", },
+	{ 3, "v1", },
+	{ 4, "a0", },
+	{ 5, "a1", },
+	{ 6, "a2", },
+	{ 7, "a3", },
+	{ 8, "t0", },
+	{ 9, "t1", },
+	{ 10, "t2", },
+	{ 11, "t3", },
+	{ 12, "t4", },
+	{ 13, "t5", },
+	{ 14, "t6", },
+	{ 15, "t7", },
+	{ 16, "s0", },
+	{ 17, "s1", },
+	{ 18, "s2", },
+	{ 19, "s3", },
+	{ 20, "s4", },
+	{ 21, "s5", },
+	{ 22, "s6", },
+	{ 23, "s7", },
+	{ 24, "t8", },
+	{ 25, "t9", },
+	{ 26, "k0", },
+	{ 27, "k1", },
+	{ 28, "gp", },
+	{ 29, "sp", },
+	{ 30, "fp", },
+	{ 31, "ra", },
 
-	{32, NULL, NULL},
-	{33, NULL, NULL},
-	{34, NULL, NULL},
-	{35, NULL, NULL},
-	{36, NULL, NULL},
-	{37, NULL, NULL},
+	{ 32, "status", },
+	{ 33, "lo", },
+	{ 34, "hi", },
+	{ 35, "badvaddr", },
+	{ 36, "cause", },
+	{ 37, "pc" },
 };
 
 /* number of mips dummy fp regs fp0 - fp31 + fsr and fir
@@ -173,7 +168,8 @@ static int mips32_write_core_reg(struct target *target, int num)
 	return ERROR_OK;
 }
 
-int mips32_get_gdb_reg_list(struct target *target, struct reg **reg_list[], int *reg_list_size)
+int mips32_get_gdb_reg_list(struct target *target, struct reg **reg_list[],
+		int *reg_list_size, enum target_register_class reg_class)
 {
 	/* get pointers to arch-specific information */
 	struct mips32_common *mips32 = target_to_mips32(target);
@@ -256,7 +252,7 @@ struct reg_cache *mips32_build_reg_cache(struct target *target)
 	int num_regs = MIPS32NUMCOREREGS;
 	struct reg_cache **cache_p = register_get_last_cache_p(&target->reg_cache);
 	struct reg_cache *cache = malloc(sizeof(struct reg_cache));
-	struct reg *reg_list = malloc(sizeof(struct reg) * num_regs);
+	struct reg *reg_list = calloc(num_regs, sizeof(struct reg));
 	struct mips32_core_reg *arch_info = malloc(sizeof(struct mips32_core_reg) * num_regs);
 	int i;
 
@@ -271,10 +267,11 @@ struct reg_cache *mips32_build_reg_cache(struct target *target)
 	mips32->core_cache = cache;
 
 	for (i = 0; i < num_regs; i++) {
-		arch_info[i] = mips32_core_reg_list_arch_info[i];
+		arch_info[i].num = mips32_regs[i].id;
 		arch_info[i].target = target;
 		arch_info[i].mips32_common = mips32;
-		reg_list[i].name = mips32_core_reg_list[i];
+
+		reg_list[i].name = mips32_regs[i].name;
 		reg_list[i].size = 32;
 		reg_list[i].value = calloc(1, 4);
 		reg_list[i].dirty = 0;
@@ -469,13 +466,67 @@ int mips32_examine(struct target *target)
 	return ERROR_OK;
 }
 
+static int mips32_configure_ibs(struct target *target)
+{
+	struct mips32_common *mips32 = target_to_mips32(target);
+	struct mips_ejtag *ejtag_info = &mips32->ejtag_info;
+	int retval, i;
+	uint32_t bpinfo;
+
+	/* get number of inst breakpoints */
+	retval = target_read_u32(target, ejtag_info->ejtag_ibs_addr, &bpinfo);
+	if (retval != ERROR_OK)
+		return retval;
+
+	mips32->num_inst_bpoints = (bpinfo >> 24) & 0x0F;
+	mips32->num_inst_bpoints_avail = mips32->num_inst_bpoints;
+	mips32->inst_break_list = calloc(mips32->num_inst_bpoints,
+		sizeof(struct mips32_comparator));
+
+	for (i = 0; i < mips32->num_inst_bpoints; i++)
+		mips32->inst_break_list[i].reg_address =
+			ejtag_info->ejtag_iba0_addr +
+			(ejtag_info->ejtag_iba_step_size * i);
+
+	/* clear IBIS reg */
+	retval = target_write_u32(target, ejtag_info->ejtag_ibs_addr, 0);
+	return retval;
+}
+
+static int mips32_configure_dbs(struct target *target)
+{
+	struct mips32_common *mips32 = target_to_mips32(target);
+	struct mips_ejtag *ejtag_info = &mips32->ejtag_info;
+	int retval, i;
+	uint32_t bpinfo;
+
+	/* get number of data breakpoints */
+	retval = target_read_u32(target, ejtag_info->ejtag_dbs_addr, &bpinfo);
+	if (retval != ERROR_OK)
+		return retval;
+
+	mips32->num_data_bpoints = (bpinfo >> 24) & 0x0F;
+	mips32->num_data_bpoints_avail = mips32->num_data_bpoints;
+	mips32->data_break_list = calloc(mips32->num_data_bpoints,
+		sizeof(struct mips32_comparator));
+
+	for (i = 0; i < mips32->num_data_bpoints; i++)
+		mips32->data_break_list[i].reg_address =
+			ejtag_info->ejtag_dba0_addr +
+			(ejtag_info->ejtag_dba_step_size * i);
+
+	/* clear DBIS reg */
+	retval = target_write_u32(target, ejtag_info->ejtag_dbs_addr, 0);
+	return retval;
+}
+
 int mips32_configure_break_unit(struct target *target)
 {
 	/* get pointers to arch-specific information */
 	struct mips32_common *mips32 = target_to_mips32(target);
+	struct mips_ejtag *ejtag_info = &mips32->ejtag_info;
 	int retval;
-	uint32_t dcr, bpinfo;
-	int i;
+	uint32_t dcr;
 
 	if (mips32->bp_scanned)
 		return ERROR_OK;
@@ -485,38 +536,19 @@ int mips32_configure_break_unit(struct target *target)
 	if (retval != ERROR_OK)
 		return retval;
 
+	/* EJTAG 2.0 does not specify EJTAG_DCR_IB and EJTAG_DCR_DB bits,
+	 * assume IB and DB registers are always present. */
+	if (ejtag_info->ejtag_version == EJTAG_VERSION_20)
+		dcr |= EJTAG_DCR_IB | EJTAG_DCR_DB;
+
 	if (dcr & EJTAG_DCR_IB) {
-		/* get number of inst breakpoints */
-		retval = target_read_u32(target, EJTAG_IBS, &bpinfo);
-		if (retval != ERROR_OK)
-			return retval;
-
-		mips32->num_inst_bpoints = (bpinfo >> 24) & 0x0F;
-		mips32->num_inst_bpoints_avail = mips32->num_inst_bpoints;
-		mips32->inst_break_list = calloc(mips32->num_inst_bpoints, sizeof(struct mips32_comparator));
-		for (i = 0; i < mips32->num_inst_bpoints; i++)
-			mips32->inst_break_list[i].reg_address = EJTAG_IBA1 + (0x100 * i);
-
-		/* clear IBIS reg */
-		retval = target_write_u32(target, EJTAG_IBS, 0);
+		retval = mips32_configure_ibs(target);
 		if (retval != ERROR_OK)
 			return retval;
 	}
 
 	if (dcr & EJTAG_DCR_DB) {
-		/* get number of data breakpoints */
-		retval = target_read_u32(target, EJTAG_DBS, &bpinfo);
-		if (retval != ERROR_OK)
-			return retval;
-
-		mips32->num_data_bpoints = (bpinfo >> 24) & 0x0F;
-		mips32->num_data_bpoints_avail = mips32->num_data_bpoints;
-		mips32->data_break_list = calloc(mips32->num_data_bpoints, sizeof(struct mips32_comparator));
-		for (i = 0; i < mips32->num_data_bpoints; i++)
-			mips32->data_break_list[i].reg_address = EJTAG_DBA1 + (0x100 * i);
-
-		/* clear DBIS reg */
-		retval = target_write_u32(target, EJTAG_DBS, 0);
+		retval = mips32_configure_dbs(target);
 		if (retval != ERROR_OK)
 			return retval;
 	}
@@ -574,10 +606,8 @@ int mips32_checksum_memory(struct target *target, uint32_t address,
 	struct working_area *crc_algorithm;
 	struct reg_param reg_params[2];
 	struct mips32_algorithm mips32_info;
-	int retval;
-	uint32_t i;
 
-	/* see contib/loaders/checksum/mips32.s for src */
+	/* see contrib/loaders/checksum/mips32.s for src */
 
 	static const uint32_t mips_crc_code[] = {
 		0x248C0000,		/* addiu	$t4, $a0, 0 */
@@ -612,9 +642,12 @@ int mips32_checksum_memory(struct target *target, uint32_t address,
 	if (target_alloc_working_area(target, sizeof(mips_crc_code), &crc_algorithm) != ERROR_OK)
 		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 
-	/* convert flash writing code into a buffer in target endianness */
-	for (i = 0; i < ARRAY_SIZE(mips_crc_code); i++)
-		target_write_u32(target, crc_algorithm->address + i*sizeof(uint32_t), mips_crc_code[i]);
+	/* convert mips crc code into a buffer in target endianness */
+	uint8_t mips_crc_code_8[sizeof(mips_crc_code)];
+	target_buffer_set_u32_array(target, mips_crc_code_8,
+					ARRAY_SIZE(mips_crc_code), mips_crc_code);
+
+	target_write_buffer(target, crc_algorithm->address, sizeof(mips_crc_code), mips_crc_code_8);
 
 	mips32_info.common_magic = MIPS32_COMMON_MAGIC;
 	mips32_info.isa_mode = MIPS32_ISA_MIPS32;
@@ -627,24 +660,19 @@ int mips32_checksum_memory(struct target *target, uint32_t address,
 
 	int timeout = 20000 * (1 + (count / (1024 * 1024)));
 
-	retval = target_run_algorithm(target, 0, NULL, 2, reg_params,
-			crc_algorithm->address, crc_algorithm->address + (sizeof(mips_crc_code)-4), timeout,
+	int retval = target_run_algorithm(target, 0, NULL, 2, reg_params,
+			crc_algorithm->address, crc_algorithm->address + (sizeof(mips_crc_code) - 4), timeout,
 			&mips32_info);
-	if (retval != ERROR_OK) {
-		destroy_reg_param(&reg_params[0]);
-		destroy_reg_param(&reg_params[1]);
-		target_free_working_area(target, crc_algorithm);
-		return retval;
-	}
 
-	*checksum = buf_get_u32(reg_params[0].value, 0, 32);
+	if (retval == ERROR_OK)
+		*checksum = buf_get_u32(reg_params[0].value, 0, 32);
 
 	destroy_reg_param(&reg_params[0]);
 	destroy_reg_param(&reg_params[1]);
 
 	target_free_working_area(target, crc_algorithm);
 
-	return ERROR_OK;
+	return retval;
 }
 
 /** Checks whether a memory region is zeroed. */
@@ -654,8 +682,6 @@ int mips32_blank_check_memory(struct target *target,
 	struct working_area *erase_check_algorithm;
 	struct reg_param reg_params[3];
 	struct mips32_algorithm mips32_info;
-	int retval;
-	uint32_t i;
 
 	static const uint32_t erase_check_code[] = {
 						/* nbyte: */
@@ -671,11 +697,12 @@ int mips32_blank_check_memory(struct target *target,
 	if (target_alloc_working_area(target, sizeof(erase_check_code), &erase_check_algorithm) != ERROR_OK)
 		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 
-	/* convert flash writing code into a buffer in target endianness */
-	for (i = 0; i < ARRAY_SIZE(erase_check_code); i++) {
-		target_write_u32(target, erase_check_algorithm->address + i*sizeof(uint32_t),
-				erase_check_code[i]);
-	}
+	/* convert erase check code into a buffer in target endianness */
+	uint8_t erase_check_code_8[sizeof(erase_check_code)];
+	target_buffer_set_u32_array(target, erase_check_code_8,
+					ARRAY_SIZE(erase_check_code), erase_check_code);
+
+	target_write_buffer(target, erase_check_algorithm->address, sizeof(erase_check_code), erase_check_code_8);
 
 	mips32_info.common_magic = MIPS32_COMMON_MAGIC;
 	mips32_info.isa_mode = MIPS32_ISA_MIPS32;
@@ -689,19 +716,13 @@ int mips32_blank_check_memory(struct target *target,
 	init_reg_param(&reg_params[2], "a2", 32, PARAM_IN_OUT);
 	buf_set_u32(reg_params[2].value, 0, 32, 0xff);
 
-	retval = target_run_algorithm(target, 0, NULL, 3, reg_params,
+	int retval = target_run_algorithm(target, 0, NULL, 3, reg_params,
 			erase_check_algorithm->address,
-			erase_check_algorithm->address + (sizeof(erase_check_code)-4),
+			erase_check_algorithm->address + (sizeof(erase_check_code) - 4),
 			10000, &mips32_info);
-	if (retval != ERROR_OK) {
-		destroy_reg_param(&reg_params[0]);
-		destroy_reg_param(&reg_params[1]);
-		destroy_reg_param(&reg_params[2]);
-		target_free_working_area(target, erase_check_algorithm);
-		return retval;
-	}
 
-	*blank = buf_get_u32(reg_params[2].value, 0, 32);
+	if (retval == ERROR_OK)
+		*blank = buf_get_u32(reg_params[2].value, 0, 32);
 
 	destroy_reg_param(&reg_params[0]);
 	destroy_reg_param(&reg_params[1]);
@@ -709,7 +730,7 @@ int mips32_blank_check_memory(struct target *target,
 
 	target_free_working_area(target, erase_check_algorithm);
 
-	return ERROR_OK;
+	return retval;
 }
 
 static int mips32_verify_pointer(struct command_context *cmd_ctx,
@@ -789,7 +810,7 @@ COMMAND_HANDLER(mips32_handle_scan_delay_command)
 	struct mips_ejtag *ejtag_info = &mips32->ejtag_info;
 
 	if (CMD_ARGC == 1)
-		COMMAND_PARSE_NUMBER(u32, CMD_ARGV[0], ejtag_info->scan_delay);
+		COMMAND_PARSE_NUMBER(uint, CMD_ARGV[0], ejtag_info->scan_delay);
 	else if (CMD_ARGC > 1)
 			return ERROR_COMMAND_SYNTAX_ERROR;
 

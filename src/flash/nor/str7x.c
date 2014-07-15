@@ -113,7 +113,7 @@ enum str7x_status_codes {
 	STR7X_BUSY = 11
 };
 
-static struct str7x_mem_layout mem_layout_str7bank0[] = {
+static const struct str7x_mem_layout mem_layout_str7bank0[] = {
 	{0x00000000, 0x02000, 0x01},
 	{0x00002000, 0x02000, 0x02},
 	{0x00004000, 0x02000, 0x04},
@@ -124,7 +124,7 @@ static struct str7x_mem_layout mem_layout_str7bank0[] = {
 	{0x00030000, 0x10000, 0x80}
 };
 
-static struct str7x_mem_layout mem_layout_str7bank1[] = {
+static const struct str7x_mem_layout mem_layout_str7bank1[] = {
 	{0x00000000, 0x02000, 0x10000},
 	{0x00002000, 0x02000, 0x20000}
 };
@@ -442,7 +442,7 @@ static int str7x_protect(struct flash_bank *bank, int set, int first, int last)
 	return ERROR_OK;
 }
 
-static int str7x_write_block(struct flash_bank *bank, uint8_t *buffer,
+static int str7x_write_block(struct flash_bank *bank, const uint8_t *buffer,
 		uint32_t offset, uint32_t count)
 {
 	struct str7x_flash_bank *str7x_info = bank->driver_priv;
@@ -489,9 +489,10 @@ static int str7x_write_block(struct flash_bank *bank, uint8_t *buffer,
 		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 	};
 
-	target_write_buffer(target, write_algorithm->address,
-			sizeof(str7x_flash_write_code),
-			(uint8_t *)str7x_flash_write_code);
+	uint8_t code[sizeof(str7x_flash_write_code)];
+	target_buffer_set_u32_array(target, code, ARRAY_SIZE(str7x_flash_write_code),
+			str7x_flash_write_code);
+	target_write_buffer(target, write_algorithm->address, sizeof(code), code);
 
 	/* memory buffer */
 	while (target_alloc_working_area_try(target, buffer_size, &source) != ERROR_OK) {
@@ -558,7 +559,7 @@ static int str7x_write_block(struct flash_bank *bank, uint8_t *buffer,
 	return retval;
 }
 
-static int str7x_write(struct flash_bank *bank, uint8_t *buffer,
+static int str7x_write(struct flash_bank *bank, const uint8_t *buffer,
 		uint32_t offset, uint32_t count)
 {
 	struct target *target = bank->target;
@@ -707,13 +708,13 @@ COMMAND_HANDLER(str7x_handle_part_id_command)
 
 static int get_str7x_info(struct flash_bank *bank, char *buf, int buf_size)
 {
-	snprintf(buf, buf_size, "str7x flash driver info");
-	/* STR7x flash doesn't support sector protection interrogation.
-	 * FLASH_NVWPAR acts as a write only register; its read value
-	 * doesn't reflect the actual protection state of the sectors.
+	/* Setting the write protection on a sector is a permanent change but it
+	 * can be disabled temporarily. FLASH_NVWPAR reflects the permanent
+	 * protection state of the sectors, not the temporary.
 	 */
-	LOG_WARNING("STR7x flash lock information might not be correct "
-			"due to hardware limitations.");
+	snprintf(buf, buf_size, "STR7x flash protection info is only valid after a power cycle, "
+			"clearing the protection is only temporary and may not be reflected in the current "
+			"info returned.");
 	return ERROR_OK;
 }
 

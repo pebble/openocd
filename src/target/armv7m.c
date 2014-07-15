@@ -52,7 +52,7 @@ static char *armv7m_exception_strings[] = {
 };
 
 /* PSP is used in some thread modes */
-const int armv7m_psp_reg_map[17] = {
+const int armv7m_psp_reg_map[ARMV7M_NUM_CORE_REGS] = {
 	ARMV7M_R0, ARMV7M_R1, ARMV7M_R2, ARMV7M_R3,
 	ARMV7M_R4, ARMV7M_R5, ARMV7M_R6, ARMV7M_R7,
 	ARMV7M_R8, ARMV7M_R9, ARMV7M_R10, ARMV7M_R11,
@@ -61,26 +61,13 @@ const int armv7m_psp_reg_map[17] = {
 };
 
 /* MSP is used in handler and some thread modes */
-const int armv7m_msp_reg_map[17] = {
+const int armv7m_msp_reg_map[ARMV7M_NUM_CORE_REGS] = {
 	ARMV7M_R0, ARMV7M_R1, ARMV7M_R2, ARMV7M_R3,
 	ARMV7M_R4, ARMV7M_R5, ARMV7M_R6, ARMV7M_R7,
 	ARMV7M_R8, ARMV7M_R9, ARMV7M_R10, ARMV7M_R11,
 	ARMV7M_R12, ARMV7M_MSP, ARMV7M_R14, ARMV7M_PC,
 	ARMV7M_xPSR,
 };
-
-#ifdef ARMV7_GDB_HACKS
-uint8_t armv7m_gdb_dummy_cpsr_value[] = {0, 0, 0, 0};
-
-struct reg armv7m_gdb_dummy_cpsr_reg = {
-	.name = "GDB dummy cpsr register",
-	.value = armv7m_gdb_dummy_cpsr_value,
-	.dirty = 0,
-	.valid = 1,
-	.size = 32,
-	.arch_info = NULL,
-};
-#endif
 
 /*
  * These registers are not memory-mapped.  The ARMv7-M profile includes
@@ -94,35 +81,35 @@ static const struct {
 	unsigned id;
 	const char *name;
 	unsigned bits;
+	enum reg_type type;
+	const char *group;
+	const char *feature;
 } armv7m_regs[] = {
-	{ ARMV7M_R0, "r0", 32 },
-	{ ARMV7M_R1, "r1", 32 },
-	{ ARMV7M_R2, "r2", 32 },
-	{ ARMV7M_R3, "r3", 32 },
+	{ ARMV7M_R0, "r0", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R1, "r1", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R2, "r2", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R3, "r3", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R4, "r4", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R5, "r5", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R6, "r6", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R7, "r7", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R8, "r8", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R9, "r9", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R10, "r10", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R11, "r11", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R12, "r12", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R13, "sp", 32, REG_TYPE_DATA_PTR, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_R14, "lr", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_PC, "pc", 32, REG_TYPE_CODE_PTR, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_xPSR, "xPSR", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
 
-	{ ARMV7M_R4, "r4", 32 },
-	{ ARMV7M_R5, "r5", 32 },
-	{ ARMV7M_R6, "r6", 32 },
-	{ ARMV7M_R7, "r7", 32 },
+	{ ARMV7M_MSP, "msp", 32, REG_TYPE_DATA_PTR, "system", "org.gnu.gdb.arm.m-system" },
+	{ ARMV7M_PSP, "psp", 32, REG_TYPE_DATA_PTR, "system", "org.gnu.gdb.arm.m-system" },
 
-	{ ARMV7M_R8, "r8", 32 },
-	{ ARMV7M_R9, "r9", 32 },
-	{ ARMV7M_R10, "r10", 32 },
-	{ ARMV7M_R11, "r11", 32 },
-
-	{ ARMV7M_R12, "r12", 32 },
-	{ ARMV7M_R13, "sp", 32 },
-	{ ARMV7M_R14, "lr", 32 },
-	{ ARMV7M_PC, "pc", 32 },
-
-	{ ARMV7M_xPSR, "xPSR", 32 },
-	{ ARMV7M_MSP, "msp", 32 },
-	{ ARMV7M_PSP, "psp", 32 },
-
-	{ ARMV7M_PRIMASK, "primask", 1 },
-	{ ARMV7M_BASEPRI, "basepri", 8 },
-	{ ARMV7M_FAULTMASK, "faultmask", 1 },
-	{ ARMV7M_CONTROL, "control", 2 },
+	{ ARMV7M_PRIMASK, "primask", 1, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.m-system" },
+	{ ARMV7M_BASEPRI, "basepri", 8, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.m-system" },
+	{ ARMV7M_FAULTMASK, "faultmask", 1, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.m-system" },
+	{ ARMV7M_CONTROL, "control", 2, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.m-system" },
 };
 
 #define ARMV7M_NUM_REGS ARRAY_SIZE(armv7m_regs)
@@ -229,24 +216,22 @@ static int armv7m_write_core_reg(struct target *target, struct reg *r,
 	int num, enum arm_mode mode, uint32_t value)
 {
 	int retval;
-	uint32_t reg_value;
 	struct arm_reg *armv7m_core_reg;
 	struct armv7m_common *armv7m = target_to_armv7m(target);
 
 	assert(num < (int)armv7m->arm.core_cache->num_regs);
 
-	reg_value = buf_get_u32(armv7m->arm.core_cache->reg_list[num].value, 0, 32);
 	armv7m_core_reg = armv7m->arm.core_cache->reg_list[num].arch_info;
 	retval = armv7m->store_core_reg_u32(target,
-			armv7m_core_reg->num,
-			reg_value);
+					    armv7m_core_reg->num,
+					    value);
 	if (retval != ERROR_OK) {
 		LOG_ERROR("JTAG failure");
 		armv7m->arm.core_cache->reg_list[num].dirty = armv7m->arm.core_cache->reg_list[num].valid;
 		return ERROR_JTAG_DEVICE_ERROR;
 	}
 
-	LOG_DEBUG("write core reg %i value 0x%" PRIx32 "", num, reg_value);
+	LOG_DEBUG("write core reg %i value 0x%" PRIx32 "", num, value);
 	armv7m->arm.core_cache->reg_list[num].valid = 1;
 	armv7m->arm.core_cache->reg_list[num].dirty = 0;
 
@@ -255,42 +240,24 @@ static int armv7m_write_core_reg(struct target *target, struct reg *r,
 
 /**
  * Returns generic ARM userspace registers to GDB.
- * GDB doesn't quite understand that most ARMs don't have floating point
- * hardware, so this also fakes a set of long-obsolete FPA registers that
- * are not used in EABI based software stacks.
  */
-int armv7m_get_gdb_reg_list(struct target *target, struct reg **reg_list[], int *reg_list_size)
+int armv7m_get_gdb_reg_list(struct target *target, struct reg **reg_list[],
+		int *reg_list_size, enum target_register_class reg_class)
 {
 	struct armv7m_common *armv7m = target_to_armv7m(target);
 	int i;
 
-	*reg_list_size = 26;
+	if (reg_class == REG_CLASS_ALL)
+		*reg_list_size = ARMV7M_NUM_REGS;
+	else
+		*reg_list_size = ARMV7M_NUM_CORE_REGS;
+
 	*reg_list = malloc(sizeof(struct reg *) * (*reg_list_size));
+	if (*reg_list == NULL)
+		return ERROR_FAIL;
 
-	/*
-	 * GDB register packet format for ARM:
-	 *  - the first 16 registers are r0..r15
-	 *  - (obsolete) 8 FPA registers
-	 *  - (obsolete) FPA status
-	 *  - CPSR
-	 */
-	for (i = 0; i < 16; i++)
+	for (i = 0; i < *reg_list_size; i++)
 		(*reg_list)[i] = &armv7m->arm.core_cache->reg_list[i];
-
-	for (i = 16; i < 24; i++)
-		(*reg_list)[i] = &arm_gdb_dummy_fp_reg;
-	(*reg_list)[24] = &arm_gdb_dummy_fps_reg;
-
-#ifdef ARMV7_GDB_HACKS
-	/* use dummy cpsr reg otherwise gdb may try and set the thumb bit */
-	(*reg_list)[25] = &armv7m_gdb_dummy_cpsr_reg;
-
-	/* ARMV7M is always in thumb mode, try to make GDB understand this
-	 * if it does not support this arch */
-	*((char *)armv7m->arm.pc->value) |= 1;
-#else
-	(*reg_list)[25] = &armv7m->arm.core_cache->reg_list[ARMV7M_xPSR];
-#endif
 
 	return ERROR_OK;
 }
@@ -549,11 +516,8 @@ struct reg_cache *armv7m_build_reg_cache(struct target *target)
 	struct reg_cache *cache = malloc(sizeof(struct reg_cache));
 	struct reg *reg_list = calloc(num_regs, sizeof(struct reg));
 	struct arm_reg *arch_info = calloc(num_regs, sizeof(struct arm_reg));
+	struct reg_feature *feature;
 	int i;
-
-#ifdef ARMV7_GDB_HACKS
-	register_init_dummy(&armv7m_gdb_dummy_cpsr_reg);
-#endif
 
 	/* Build the process context cache */
 	cache->name = "arm v7m registers";
@@ -574,11 +538,30 @@ struct reg_cache *armv7m_build_reg_cache(struct target *target)
 		reg_list[i].valid = 0;
 		reg_list[i].type = &armv7m_reg_type;
 		reg_list[i].arch_info = &arch_info[i];
+
+		reg_list[i].group = armv7m_regs[i].group;
+		reg_list[i].number = i;
+		reg_list[i].exist = true;
+		reg_list[i].caller_save = true;	/* gdb defaults to true */
+
+		feature = calloc(1, sizeof(struct reg_feature));
+		if (feature) {
+			feature->name = armv7m_regs[i].feature;
+			reg_list[i].feature = feature;
+		} else
+			LOG_ERROR("unable to allocate feature list");
+
+		reg_list[i].reg_data_type = calloc(1, sizeof(struct reg_data_type));
+		if (reg_list[i].reg_data_type)
+			reg_list[i].reg_data_type->type = armv7m_regs[i].type;
+		else
+			LOG_ERROR("unable to allocate reg type list");
 	}
 
 	arm->cpsr = reg_list + ARMV7M_xPSR;
 	arm->pc = reg_list + ARMV7M_PC;
 	arm->core_cache = cache;
+
 	return cache;
 }
 
@@ -617,7 +600,7 @@ int armv7m_checksum_memory(struct target *target,
 
 	/* see contrib/loaders/checksum/armv7m_crc.s for src */
 
-	static const uint8_t cortex_m3_crc_code[] = {
+	static const uint8_t cortex_m_crc_code[] = {
 		/* main: */
 		0x02, 0x46,			/* mov		r2, r0 */
 		0x00, 0x20,			/* movs		r0, #0 */
@@ -651,12 +634,12 @@ int armv7m_checksum_memory(struct target *target,
 		0xB7, 0x1D, 0xC1, 0x04	/* CRC32XOR:	.word	0x04c11db7 */
 	};
 
-	retval = target_alloc_working_area(target, sizeof(cortex_m3_crc_code), &crc_algorithm);
+	retval = target_alloc_working_area(target, sizeof(cortex_m_crc_code), &crc_algorithm);
 	if (retval != ERROR_OK)
 		return retval;
 
 	retval = target_write_buffer(target, crc_algorithm->address,
-			sizeof(cortex_m3_crc_code), (uint8_t *)cortex_m3_crc_code);
+			sizeof(cortex_m_crc_code), (uint8_t *)cortex_m_crc_code);
 	if (retval != ERROR_OK)
 		goto cleanup;
 
@@ -672,13 +655,13 @@ int armv7m_checksum_memory(struct target *target,
 	int timeout = 20000 * (1 + (count / (1024 * 1024)));
 
 	retval = target_run_algorithm(target, 0, NULL, 2, reg_params, crc_algorithm->address,
-			crc_algorithm->address + (sizeof(cortex_m3_crc_code) - 6),
+			crc_algorithm->address + (sizeof(cortex_m_crc_code) - 6),
 			timeout, &armv7m_info);
 
 	if (retval == ERROR_OK)
 		*checksum = buf_get_u32(reg_params[0].value, 0, 32);
 	else
-		LOG_ERROR("error executing cortex_m3 crc algorithm");
+		LOG_ERROR("error executing cortex_m crc algorithm");
 
 	destroy_reg_param(&reg_params[0]);
 	destroy_reg_param(&reg_params[1]);

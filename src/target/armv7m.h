@@ -30,16 +30,6 @@
 #include "arm_adi_v5.h"
 #include "arm.h"
 
-/* define for enabling armv7 gdb workarounds */
-#if 1
-#define ARMV7_GDB_HACKS
-#endif
-
-#ifdef ARMV7_GDB_HACKS
-extern uint8_t armv7m_gdb_dummy_cpsr_value[];
-extern struct reg armv7m_gdb_dummy_cpsr_reg;
-#endif
-
 extern const int armv7m_psp_reg_map[];
 extern const int armv7m_msp_reg_map[];
 
@@ -145,6 +135,8 @@ enum {
 	FPv4_SP,
 };
 
+#define ARMV7M_NUM_CORE_REGS (ARMV7M_xPSR + 1)
+
 #define ARMV7M_COMMON_MAGIC 0x2A452A45
 
 struct armv7m_common {
@@ -195,7 +187,8 @@ int armv7m_mode_to_number(enum armv7m_mode mode);
 
 int armv7m_arch_state(struct target *target);
 int armv7m_get_gdb_reg_list(struct target *target,
-		struct reg **reg_list[], int *reg_list_size);
+		struct reg **reg_list[], int *reg_list_size,
+		enum target_register_class reg_class);
 
 int armv7m_init_arch_info(struct target *target, struct armv7m_common *armv7m);
 

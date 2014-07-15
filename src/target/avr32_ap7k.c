@@ -178,7 +178,7 @@ static struct reg_cache *avr32_build_reg_cache(struct target *target)
 	struct avr32_ap7k_common *ap7k = target_to_ap7k(target);
 	struct reg_cache **cache_p = register_get_last_cache_p(&target->reg_cache);
 	struct reg_cache *cache = malloc(sizeof(struct reg_cache));
-	struct reg *reg_list = malloc(sizeof(struct reg) * num_regs);
+	struct reg *reg_list = calloc(num_regs, sizeof(struct reg));
 	struct avr32_core_reg *arch_info =
 		malloc(sizeof(struct avr32_core_reg) * num_regs);
 	int i;
@@ -307,13 +307,6 @@ static int avr32_ap7k_assert_reset(struct target *target)
 }
 
 static int avr32_ap7k_deassert_reset(struct target *target)
-{
-	LOG_ERROR("%s: implement me", __func__);
-
-	return ERROR_OK;
-}
-
-static int avr32_ap7k_soft_reset_halt(struct target *target)
 {
 	LOG_ERROR("%s: implement me", __func__);
 
@@ -551,7 +544,7 @@ static int avr32_ap7k_examine(struct target *target)
 	if (!target_was_examined(target)) {
 		target_set_examined(target);
 		avr32_jtag_nexus_read(&ap7k->jtag, AVR32_OCDREG_DID, &devid);
-		LOG_INFO("device id: %08x", devid);
+		LOG_INFO("device id: %08" PRIx32, devid);
 		avr32_ocd_setbits(&ap7k->jtag, AVR32_OCDREG_DC, OCDREG_DC_DBE);
 		avr32_jtag_nexus_read(&ap7k->jtag, AVR32_OCDREG_DS, &ds);
 
@@ -576,7 +569,8 @@ int avr32_ap7k_arch_state(struct target *target)
 	return ERROR_OK;
 }
 
-int avr32_ap7k_get_gdb_reg_list(struct target *target, struct reg **reg_list[], int *reg_list_size)
+int avr32_ap7k_get_gdb_reg_list(struct target *target, struct reg **reg_list[],
+		int *reg_list_size, enum target_register_class reg_class)
 {
 #if 0
 	/* get pointers to arch-specific information */
@@ -599,15 +593,11 @@ int avr32_ap7k_get_gdb_reg_list(struct target *target, struct reg **reg_list[], 
 	return ERROR_FAIL;
 }
 
-
-
 struct target_type avr32_ap7k_target = {
 	.name = "avr32_ap7k",
 
 	.poll = avr32_ap7k_poll,
 	.arch_state = avr32_ap7k_arch_state,
-
-	.target_request_data = NULL,
 
 	.halt = avr32_ap7k_halt,
 	.resume = avr32_ap7k_resume,
@@ -615,7 +605,6 @@ struct target_type avr32_ap7k_target = {
 
 	.assert_reset = avr32_ap7k_assert_reset,
 	.deassert_reset = avr32_ap7k_deassert_reset,
-	.soft_reset_halt = avr32_ap7k_soft_reset_halt,
 
 	.get_gdb_reg_list = avr32_ap7k_get_gdb_reg_list,
 

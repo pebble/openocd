@@ -44,6 +44,10 @@
 #define SSP_PROBE_TIMEOUT (100)
 #define SSP_MAX_TIMEOUT  (3000)
 
+/* Size of the stack to alloc in the working area for the execution of
+ * the ROM spifi_init() function */
+#define SPIFI_INIT_STACK_SIZE  512
+
 struct lpcspifi_flash_bank {
 	int probed;
 	uint32_t ssp_base;
@@ -51,7 +55,7 @@ struct lpcspifi_flash_bank {
 	uint32_t ioconfig_base;
 	uint32_t bank_num;
 	uint32_t max_spi_clock_mhz;
-	struct flash_device *dev;
+	const struct flash_device *dev;
 };
 
 struct lpcspifi_target {
@@ -63,7 +67,7 @@ struct lpcspifi_target {
 	uint32_t ioconfig_base; /* base address for the port word pin registers */
 };
 
-static struct lpcspifi_target target_devices[] = {
+static const struct lpcspifi_target target_devices[] = {
 	/* name,          tap_idcode, spifi_base, ssp_base,   io_base,    ioconfig_base */
 	{ "LPC43xx/18xx", 0x4ba00477, 0x14000000, 0x40083000, 0x400F4000, 0x40086000 },
 	{ NULL,           0,          0,          0,          0,          0 }
@@ -151,7 +155,7 @@ static int lpcspifi_set_hw_mode(struct flash_bank *bank)
 	uint32_t ssp_base = lpcspifi_info->ssp_base;
 	struct armv7m_algorithm armv7m_info;
 	struct working_area *spifi_init_algorithm;
-	struct reg_param reg_params[1];
+	struct reg_param reg_params[2];
 	int retval = ERROR_OK;
 
 	LOG_DEBUG("Uninitializing LPC43xx SSP");
@@ -187,19 +191,19 @@ static int lpcspifi_set_hw_mode(struct flash_bank *bank)
 
 	LOG_DEBUG("Allocating working area for SPIFI init algorithm");
 	/* Get memory for spifi initialization algorithm */
-	retval = target_alloc_working_area(target, sizeof(spifi_init_code),
-		&spifi_init_algorithm);
+	retval = target_alloc_working_area(target, sizeof(spifi_init_code)
+		+ SPIFI_INIT_STACK_SIZE, &spifi_init_algorithm);
 	if (retval != ERROR_OK) {
 		LOG_ERROR("Insufficient working area to initialize SPIFI "\
 			"module. You must allocate at least %zdB of working "\
 			"area in order to use this driver.",
-			sizeof(spifi_init_code)
+			sizeof(spifi_init_code) + SPIFI_INIT_STACK_SIZE
 		);
 
 		return retval;
 	}
 
-	LOG_DEBUG("Writing algorithm to working area at 0x%08x",
+	LOG_DEBUG("Writing algorithm to working area at 0x%08" PRIx32,
 		spifi_init_algorithm->address);
 	/* Write algorithm to working area */
 	retval = target_write_buffer(target,
@@ -214,6 +218,8 @@ static int lpcspifi_set_hw_mode(struct flash_bank *bank)
 	}
 
 	init_reg_param(&reg_params[0], "r0", 32, PARAM_OUT);		/* spifi clk speed */
+	/* the spifi_init() rom API makes use of the stack */
+	init_reg_param(&reg_params[1], "sp", 32, PARAM_OUT);
 
 	/* For now, the algorithm will set up the SPIFI module
 	 * @ the IRC clock speed. In the future, it could be made
@@ -221,10 +227,13 @@ static int lpcspifi_set_hw_mode(struct flash_bank *bank)
 	 * already configured them in order to speed up memory-
 	 * mapped reads. */
 	buf_set_u32(reg_params[0].value, 0, 32, 12);
+	/* valid stack pointer */
+	buf_set_u32(reg_params[1].value, 0, 32, (spifi_init_algorithm->address +
+		sizeof(spifi_init_code) + SPIFI_INIT_STACK_SIZE) & ~7UL);
 
 	/* Run the algorithm */
 	LOG_DEBUG("Running SPIFI init algorithm");
-	retval = target_run_algorithm(target, 0 , NULL, 1, reg_params,
+	retval = target_run_algorithm(target, 0 , NULL, 2, reg_params,
 		spifi_init_algorithm->address,
 		spifi_init_algorithm->address + sizeof(spifi_init_code) - 2,
 		1000, &armv7m_info);
@@ -235,6 +244,7 @@ static int lpcspifi_set_hw_mode(struct flash_bank *bank)
 	target_free_working_area(target, spifi_init_algorithm);
 
 	destroy_reg_param(&reg_params[0]);
+	destroy_reg_param(&reg_params[1]);
 
 	return retval;
 }
@@ -581,7 +591,7 @@ static int lpcspifi_protect(struct flash_bank *bank, int set,
 	return ERROR_OK;
 }
 
-static int lpcspifi_write(struct flash_bank *bank, uint8_t *buffer,
+static int lpcspifi_write(struct flash_bank *bank, const uint8_t *buffer,
 	uint32_t offset, uint32_t count)
 {
 	struct target *target = bank->target;
@@ -715,7 +725,7 @@ static int lpcspifi_write(struct flash_bank *bank, uint8_t *buffer,
 		LOG_WARNING("Working area size is limited; flash writes may be"\
 			" slow. Increase working area size to at least %zdB"\
 			" to reduce write times.",
-			sizeof(lpcspifi_flash_write_code) + page_size
+			(size_t)(sizeof(lpcspifi_flash_write_code) + page_size)
 		);
 	else if (fifo_size > 0x2000) /* Beyond this point, we start to get diminishing returns */
 		fifo_size = 0x2000;
@@ -774,6 +784,7 @@ static int lpcspifi_read_flash_id(struct flash_bank *bank, uint32_t *id)
 	uint32_t ssp_base = lpcspifi_info->ssp_base;
 	uint32_t io_base = lpcspifi_info->io_base;
 	uint32_t value;
+	uint8_t id_buf[3] = {0, 0, 0};
 	int retval;
 
 	if (target->state != TARGET_HALTED) {
@@ -808,7 +819,7 @@ static int lpcspifi_read_flash_id(struct flash_bank *bank, uint32_t *id)
 	if (retval == ERROR_OK)
 		retval = ssp_read_reg(target, ssp_base, SSP_DATA, &value);
 	if (retval == ERROR_OK)
-		((uint8_t *)id)[0] = value;
+		id_buf[0] = value;
 
 	/* Dummy write to clock in data */
 	if (retval == ERROR_OK)
@@ -818,7 +829,7 @@ static int lpcspifi_read_flash_id(struct flash_bank *bank, uint32_t *id)
 	if (retval == ERROR_OK)
 		retval = ssp_read_reg(target, ssp_base, SSP_DATA, &value);
 	if (retval == ERROR_OK)
-		((uint8_t *)id)[1] = value;
+		id_buf[1] = value;
 
 	/* Dummy write to clock in data */
 	if (retval == ERROR_OK)
@@ -828,10 +839,12 @@ static int lpcspifi_read_flash_id(struct flash_bank *bank, uint32_t *id)
 	if (retval == ERROR_OK)
 		retval = ssp_read_reg(target, ssp_base, SSP_DATA, &value);
 	if (retval == ERROR_OK)
-		((uint8_t *)id)[2] = value;
+		id_buf[2] = value;
 
 	if (retval == ERROR_OK)
 		retval = ssp_setcs(target, io_base, 1);
+	if (retval == ERROR_OK)
+		*id = id_buf[2] << 16 | id_buf[1] << 8 | id_buf[0];
 
 	return retval;
 }
@@ -845,7 +858,7 @@ static int lpcspifi_probe(struct flash_bank *bank)
 	uint32_t ioconfig_base;
 	struct flash_sector *sectors;
 	uint32_t id = 0; /* silence uninitialized warning */
-	struct lpcspifi_target *target_device;
+	const struct lpcspifi_target *target_device;
 	int retval;
 
 	/* If we've already probed, we should be fine to skip this time. */
@@ -883,7 +896,7 @@ static int lpcspifi_probe(struct flash_bank *bank)
 		return retval;
 
 	lpcspifi_info->dev = NULL;
-	for (struct flash_device *p = flash_devices; p->name ; p++)
+	for (const struct flash_device *p = flash_devices; p->name ; p++)
 		if (p->device_id == id) {
 			lpcspifi_info->dev = p;
 			break;
@@ -913,7 +926,7 @@ static int lpcspifi_probe(struct flash_bank *bank)
 		sectors[sector].offset = sector * lpcspifi_info->dev->sectorsize;
 		sectors[sector].size = lpcspifi_info->dev->sectorsize;
 		sectors[sector].is_erased = -1;
-		sectors[sector].is_protected = 1;
+		sectors[sector].is_protected = 0;
 	}
 
 	bank->sectors = sectors;
@@ -947,7 +960,7 @@ static int get_lpcspifi_info(struct flash_bank *bank, char *buf, int buf_size)
 	}
 
 	snprintf(buf, buf_size, "\nSPIFI flash information:\n"
-		"  Device \'%s\' (ID 0x%08x)\n",
+		"  Device \'%s\' (ID 0x%08" PRIx32 ")\n",
 		lpcspifi_info->dev->name, lpcspifi_info->dev->device_id);
 
 	return ERROR_OK;

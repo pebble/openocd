@@ -22,7 +22,7 @@
 #ifndef JTAG_LIBUSB_COMMON_H
 #define JTAG_LIBUSB_COMMON_H
 
-#include <libusb-1.0/libusb.h>
+#include <libusb.h>
 
 #define jtag_libusb_device			libusb_device
 #define jtag_libusb_device_handle		libusb_device_handle
@@ -41,6 +41,12 @@ static inline int jtag_libusb_claim_interface(jtag_libusb_device_handle *devh,
 	return libusb_claim_interface(devh, iface);
 };
 
+static inline int jtag_libusb_release_interface(jtag_libusb_device_handle *devh,
+		int iface)
+{
+	return libusb_release_interface(devh, iface);
+}
+
 int jtag_libusb_open(const uint16_t vids[], const uint16_t pids[],
 		struct jtag_libusb_device_handle **out);
 void jtag_libusb_close(jtag_libusb_device_handle *dev);
@@ -56,5 +62,6 @@ int jtag_libusb_set_configuration(jtag_libusb_device_handle *devh,
 int jtag_libusb_get_endpoints(struct jtag_libusb_device *udev,
 		unsigned int *usb_read_ep,
 		unsigned int *usb_write_ep);
+int jtag_libusb_get_pid(struct jtag_libusb_device *dev, uint16_t *pid);
 
 #endif /* JTAG_USB_COMMON_H */

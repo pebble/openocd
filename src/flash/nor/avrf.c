@@ -63,12 +63,17 @@ struct avrf_flash_bank {
 	int probed;
 };
 
-static struct avrf_type avft_chips_info[] = {
+static const struct avrf_type avft_chips_info[] = {
 /*	name, chip_id,	flash_page_size, flash_page_num,
  *			eeprom_page_size, eeprom_page_num
  */
 	{"atmega128", 0x9702, 256, 512, 8, 512},
 	{"at90can128", 0x9781, 256, 512, 8, 512},
+	{"atmega164p", 0x940a, 128, 128, 4, 128},
+	{"atmega324p", 0x9508, 128, 256, 4, 256},
+	{"atmega324pa", 0x9511, 128, 256, 4, 256},
+	{"atmega644p", 0x960a, 256, 256, 8, 256},
+	{"atmega1284p", 0x9705, 256, 512, 8, 512},
 };
 
 /* avr program functions */
@@ -137,7 +142,7 @@ static int avr_jtagprg_chiperase(struct avr_common *avr)
 }
 
 static int avr_jtagprg_writeflashpage(struct avr_common *avr,
-	uint8_t *page_buf,
+	const uint8_t *page_buf,
 	uint32_t buf_size,
 	uint32_t addr,
 	uint32_t page_size)
@@ -234,7 +239,7 @@ static int avrf_protect(struct flash_bank *bank, int set, int first, int last)
 	return ERROR_OK;
 }
 
-static int avrf_write(struct flash_bank *bank, uint8_t *buffer, uint32_t offset, uint32_t count)
+static int avrf_write(struct flash_bank *bank, const uint8_t *buffer, uint32_t offset, uint32_t count)
 {
 	struct target *target = bank->target;
 	struct avr_common *avr = target->arch_info;
@@ -288,7 +293,7 @@ static int avrf_probe(struct flash_bank *bank)
 	struct target *target = bank->target;
 	struct avrf_flash_bank *avrf_info = bank->driver_priv;
 	struct avr_common *avr = target->arch_info;
-	struct avrf_type *avr_info = NULL;
+	const struct avrf_type *avr_info = NULL;
 	int i;
 	uint32_t device_id;
 
@@ -365,7 +370,7 @@ static int avrf_info(struct flash_bank *bank, char *buf, int buf_size)
 {
 	struct target *target = bank->target;
 	struct avr_common *avr = target->arch_info;
-	struct avrf_type *avr_info = NULL;
+	const struct avrf_type *avr_info = NULL;
 	int i;
 	uint32_t device_id;
 

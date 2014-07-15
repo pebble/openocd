@@ -63,7 +63,7 @@ proc ocd_process_reset_inner { MODE } {
 
 	# Examine all targets on enabled taps.
 	foreach t $targets {
-		if {[jtag tapisenabled [$t cget -chain-position]]} {
+		if {![using_jtag] || [jtag tapisenabled [$t cget -chain-position]]} {
 			$t invoke-event examine-start
 			set err [catch "$t arp_examine"]
 			if { $err == 0 } {
@@ -79,7 +79,7 @@ proc ocd_process_reset_inner { MODE } {
 	}
 	foreach t $targets {
 		# C code needs to know if we expect to 'halt'
-		if {[jtag tapisenabled [$t cget -chain-position]]} {
+		if {![using_jtag] || [jtag tapisenabled [$t cget -chain-position]]} {
 			$t arp_reset assert $halt
 		}
 	}
@@ -94,7 +94,7 @@ proc ocd_process_reset_inner { MODE } {
 	}
 	foreach t $targets {
 		# Again, de-assert code needs to know if we 'halt'
-		if {[jtag tapisenabled [$t cget -chain-position]]} {
+		if {![using_jtag] || [jtag tapisenabled [$t cget -chain-position]]} {
 			$t arp_reset deassert $halt
 		}
 	}
@@ -107,7 +107,7 @@ proc ocd_process_reset_inner { MODE } {
 	# first executing any instructions.
 	if { $halt } {
 		foreach t $targets {
-			if {[jtag tapisenabled [$t cget -chain-position]] == 0} {
+			if {[using_jtag] && ![jtag tapisenabled [$t cget -chain-position]]} {
 				continue
 			}
 
@@ -131,7 +131,7 @@ proc ocd_process_reset_inner { MODE } {
 	#Pass 2 - if needed "init"
 	if { 0 == [string compare init $MODE] } {
 		foreach t $targets {
-			if {[jtag tapisenabled [$t cget -chain-position]] == 0} {
+			if {[using_jtag] && ![jtag tapisenabled [$t cget -chain-position]]} {
 				continue
 			}
 
@@ -148,6 +148,21 @@ proc ocd_process_reset_inner { MODE } {
 	}
 }
 
+proc using_jtag {} {
+	set _TRANSPORT [ transport select ]
+	expr { [ string first "jtag" $_TRANSPORT ] != -1 }
+}
+
+proc using_swd {} {
+	set _TRANSPORT [ transport select ]
+	expr { [ string first "swd" $_TRANSPORT ] != -1 }
+}
+
+proc using_hla {} {
+	set _TRANSPORT [ transport select ]
+	expr { [ string first "hla" $_TRANSPORT ] != -1 }
+}
+
 #########
 
 # Temporary migration aid.  May be removed starting in January 2011.
@@ -162,6 +177,21 @@ proc armv4_5 params {
 #
 # By default(classic) the config scripts will set up the target configuration
 proc init_targets {} {
+}
+
+proc set_default_target_event {t e s} {
+	if {[$t cget -event $e] == ""} {
+		$t configure -event $e $s
+	}
+}
+
+proc init_target_events {} {
+	set targets [target names]
+
+	foreach t $targets {
+		set_default_target_event $t gdb-flash-erase-start "reset init"
+		set_default_target_event $t gdb-flash-write-end "reset halt"
+	}
 }
 
 # Additionally board config scripts can define a procedure init_board that will be executed after init and init_targets

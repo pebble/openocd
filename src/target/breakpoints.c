@@ -62,7 +62,7 @@ int breakpoint_add_internal(struct target *target,
 			 * breakpoint" ... check all the parameters before
 			 * succeeding.
 			 */
-			LOG_DEBUG("Duplicate Breakpoint address: 0x%08" PRIx32 " (BP %d)",
+			LOG_DEBUG("Duplicate Breakpoint address: 0x%08" PRIx32 " (BP %" PRIu32 ")",
 				address, breakpoint->unique_id);
 			return ERROR_OK;
 		}
@@ -100,7 +100,7 @@ fail:
 			return retval;
 	}
 
-	LOG_DEBUG("added %s breakpoint at 0x%8.8" PRIx32 " of length 0x%8.8x, (BPID: %d)",
+	LOG_DEBUG("added %s breakpoint at 0x%8.8" PRIx32 " of length 0x%8.8x, (BPID: %" PRIu32 ")",
 		breakpoint_type_strings[(*breakpoint_p)->type],
 		(*breakpoint_p)->address, (*breakpoint_p)->length,
 		(*breakpoint_p)->unique_id);
@@ -126,7 +126,7 @@ int context_breakpoint_add_internal(struct target *target,
 			 * breakpoint" ... check all the parameters before
 			 * succeeding.
 			 */
-			LOG_DEBUG("Duplicate Breakpoint asid: 0x%08" PRIx32 " (BP %d)",
+			LOG_DEBUG("Duplicate Breakpoint asid: 0x%08" PRIx32 " (BP %" PRIu32 ")",
 				asid, breakpoint->unique_id);
 			return -1;
 		}
@@ -152,7 +152,7 @@ int context_breakpoint_add_internal(struct target *target,
 		return retval;
 	}
 
-	LOG_DEBUG("added %s Context breakpoint at 0x%8.8" PRIx32 " of length 0x%8.8x, (BPID: %d)",
+	LOG_DEBUG("added %s Context breakpoint at 0x%8.8" PRIx32 " of length 0x%8.8x, (BPID: %" PRIu32 ")",
 		breakpoint_type_strings[(*breakpoint_p)->type],
 		(*breakpoint_p)->asid, (*breakpoint_p)->length,
 		(*breakpoint_p)->unique_id);
@@ -178,11 +178,11 @@ int hybrid_breakpoint_add_internal(struct target *target,
 			 * breakpoint" ... check all the parameters before
 			 * succeeding.
 			 */
-			LOG_DEBUG("Duplicate Hybrid Breakpoint asid: 0x%08" PRIx32 " (BP %d)",
+			LOG_DEBUG("Duplicate Hybrid Breakpoint asid: 0x%08" PRIx32 " (BP %" PRIu32 ")",
 				asid, breakpoint->unique_id);
 			return -1;
 		} else if ((breakpoint->address == address) && (breakpoint->asid == 0)) {
-			LOG_DEBUG("Duplicate Breakpoint IVA: 0x%08" PRIx32 " (BP %d)",
+			LOG_DEBUG("Duplicate Breakpoint IVA: 0x%08" PRIx32 " (BP %" PRIu32 ")",
 				address, breakpoint->unique_id);
 			return -1;
 
@@ -210,7 +210,7 @@ int hybrid_breakpoint_add_internal(struct target *target,
 		return retval;
 	}
 	LOG_DEBUG(
-		"added %s Hybrid breakpoint at address 0x%8.8" PRIx32 " of length 0x%8.8x, (BPID: %d)",
+		"added %s Hybrid breakpoint at address 0x%8.8" PRIx32 " of length 0x%8.8x, (BPID: %" PRIu32 ")",
 		breakpoint_type_strings[(*breakpoint_p)->type],
 		(*breakpoint_p)->address,
 		(*breakpoint_p)->length,
@@ -306,7 +306,7 @@ static void breakpoint_free(struct target *target, struct breakpoint *breakpoint
 
 	retval = target_remove_breakpoint(target, breakpoint);
 
-	LOG_DEBUG("free BPID: %d --> %d", breakpoint->unique_id, retval);
+	LOG_DEBUG("free BPID: %" PRIu32 " --> %d", breakpoint->unique_id, retval);
 	(*breakpoint_p) = breakpoint->next;
 	free(breakpoint->orig_instr);
 	free(breakpoint);
@@ -499,4 +499,23 @@ void watchpoint_clear_target(struct target *target)
 		target_name(target));
 	while (target->watchpoints != NULL)
 		watchpoint_free(target, target->watchpoints);
+}
+
+int watchpoint_hit(struct target *target, enum watchpoint_rw *rw, uint32_t *address)
+{
+	int retval;
+	struct watchpoint *hit_watchpoint;
+
+	retval = target_hit_watchpoint(target, &hit_watchpoint);
+	if (retval != ERROR_OK)
+		return ERROR_FAIL;
+
+	*rw = hit_watchpoint->rw;
+	*address = hit_watchpoint->address;
+
+	LOG_DEBUG("Found hit watchpoint at 0x%8.8" PRIx32 " (WPID: %d)",
+		hit_watchpoint->address,
+		hit_watchpoint->unique_id);
+
+	return ERROR_OK;
 }

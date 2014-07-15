@@ -79,6 +79,7 @@ Free Documentation License''.
 * Architecture and Core Commands::   Architecture and Core Commands
 * JTAG Commands::                    JTAG Commands
 * Boundary Scan Commands::           Boundary Scan Commands
+* Utility Commands::                 Utility Commands
 * TFTP::                             TFTP
 * GDB and OpenOCD::                  Using GDB and OpenOCD
 * Tcl Scripting API::                Tcl Scripting API
@@ -98,8 +99,8 @@ Free Documentation License''.
 @unnumbered About
 @cindex about
 
-OpenOCD was created by Dominic Rath as part of a diploma thesis written at the
-University of Applied Sciences Augsburg (@uref{http://www.fh-augsburg.de}).
+OpenOCD was created by Dominic Rath as part of a 2005 diploma thesis written
+at the University of Applied Sciences Augsburg (@uref{http://www.hs-augsburg.de}).
 Since that time, the project has grown into an active open-source project,
 supported by a diverse community of software and hardware developers from
 around the world.
@@ -128,7 +129,7 @@ they are called. (There are also product naming differences.)
 These adapters are sometimes packaged as discrete dongles, which
 may generically be called @dfn{hardware interface dongles}.
 Some development boards also integrate them directly, which may
-let the development board can be directly connected to the debug
+let the development board connect directly to the debug
 host over USB (and sometimes also to power it over USB).
 
 For example, a @dfn{JTAG Adapter} supports JTAG
@@ -141,7 +142,7 @@ scan operations.
 
 There are also @dfn{SWD Adapters} that support Serial Wire Debug (SWD)
 signaling to communicate with some newer ARM cores, as well as debug
-adapters which support both JTAG and SWD transports. SWD only supports
+adapters which support both JTAG and SWD transports. SWD supports only
 debugging, whereas JTAG also supports boundary scan operations.
 
 For some chips, there are also @dfn{Programming Adapters} supporting
@@ -150,20 +151,20 @@ support for on-chip debugging or boundary scan.
 (At this writing, OpenOCD does not support such non-debug adapters.)
 
 
-@b{Dongles:} OpenOCD currently supports many types of hardware dongles: USB
-based, parallel port based, and other standalone boxes that run
+@b{Dongles:} OpenOCD currently supports many types of hardware dongles:
+USB-based, parallel port-based, and other standalone boxes that run
 OpenOCD internally. @xref{Debug Adapter Hardware}.
 
 @b{GDB Debug:} It allows ARM7 (ARM7TDMI and ARM720t), ARM9 (ARM920T,
-ARM922T, ARM926EJ--S, ARM966E--S), XScale (PXA25x, IXP42x) and
-Cortex-M3 (Stellaris LM3, ST STM32 and Energy Micro EFM32) based cores to be
-debugged via the GDB protocol.
+ARM922T, ARM926EJ--S, ARM966E--S), XScale (PXA25x, IXP42x), Cortex-M3
+(Stellaris LM3, ST STM32 and Energy Micro EFM32) and Intel Quark (x10xx)
+based cores to be debugged via the GDB protocol.
 
-@b{Flash Programing:} Flash writing is supported for external CFI
-compatible NOR flashes (Intel and AMD/Spansion command set) and several
+@b{Flash Programming:} Flash writing is supported for external
+CFI-compatible NOR flashes (Intel and AMD/Spansion command set) and several
 internal flashes (LPC1700, LPC1800, LPC2000, LPC4300, AT91SAM7, AT91SAM3U,
 STR7x, STR9x, LM3, STM32x and EFM32). Preliminary support for various NAND flash
-controllers (LPC3180, Orion, S3C24xx, more) controller is included.
+controllers (LPC3180, Orion, S3C24xx, more) is included.
 
 @section OpenOCD Web Site
 
@@ -217,10 +218,10 @@ documentation, as well as more conventional bug fixes and enhancements.
 The resources in this chapter are available for developers wishing to explore
 or expand the OpenOCD source code.
 
-@section OpenOCD GIT Repository
+@section OpenOCD Git Repository
 
 During the 0.3.x release cycle, OpenOCD switched from Subversion to
-a GIT repository hosted at SourceForge. The repository URL is:
+a Git repository hosted at SourceForge. The repository URL is:
 
 @uref{git://git.code.sf.net/p/openocd/code}
 
@@ -232,11 +233,11 @@ You may prefer to use a mirror and the HTTP protocol:
 
 @uref{http://repo.or.cz/r/openocd.git}
 
-With standard GIT tools, use @command{git clone} to initialize
+With standard Git tools, use @command{git clone} to initialize
 a local repository, and @command{git pull} to update it.
 There are also gitweb pages letting you browse the repository
 with a web browser, or download arbitrary snapshots without
-needing a GIT client:
+needing a Git client:
 
 @uref{http://repo.or.cz/w/openocd.git}
 
@@ -259,7 +260,26 @@ processes, and similar documentation:
 
 This document is a work-in-progress, but contributions would be welcome
 to fill in the gaps. All of the source files are provided in-tree,
-listed in the Doxyfile configuration in the top of the source tree.
+listed in the Doxyfile configuration at the top of the source tree.
+
+@section Gerrit Review System
+
+All changes in the OpenOCD Git repository go through the web-based Gerrit
+Code Review System:
+
+@uref{http://openocd.zylin.com/}
+
+After a one-time registration and repository setup, anyone can push commits
+from their local Git repository directly into Gerrit.
+All users and developers are encouraged to review, test, discuss and vote
+for changes in Gerrit. The feedback provides the basis for a maintainer to
+eventually submit the change to the main Git repository.
+
+The @file{HACKING} file, also available as the Patch Guide in the Doxygen
+Developer Manual, contains basic information about how to connect a
+repository to Gerrit, prepare and push patches. Patch authors are expected to
+maintain their changes while they're in Gerrit, respond to feedback and if
+necessary rework and push improved versions of the change.
 
 @section OpenOCD Developer Mailing List
 
@@ -267,10 +287,6 @@ The OpenOCD Developer Mailing List provides the primary means of
 communication between developers:
 
 @uref{https://lists.sourceforge.net/mailman/listinfo/openocd-devel}
-
-Discuss and submit patches to this list.
-The @file{HACKING} file contains basic information about how
-to prepare patches.
 
 @section OpenOCD Bug Database
 
@@ -290,16 +306,16 @@ using Trac for its bug database:
 @cindex USB Adapter
 @cindex RTCK
 
-Defined: @b{dongle}: A small device that plugins into a computer and serves as
+Defined: @b{dongle}: A small device that plugs into a computer and serves as
 an adapter .... [snip]
 
 In the OpenOCD case, this generally refers to @b{a small adapter} that
-attaches to your computer via USB or the Parallel Printer Port. One
-exception is the Zylin ZY1000, packaged as a small box you attach via
-an ethernet cable. The Zylin ZY1000 has the advantage that it does not
+attaches to your computer via USB or the parallel port. One
+exception is the Ultimate Solutions ZY1000, packaged as a small box you
+attach via an ethernet cable. The ZY1000 has the advantage that it does not
 require any drivers to be installed on the developer PC. It also has
 a built in web interface. It supports RTCK/RCLK or adaptive clocking
-and has a built in relay to power cycle targets remotely.
+and has a built-in relay to power cycle targets remotely.
 
 
 @section Choosing a Dongle
@@ -315,17 +331,17 @@ Does your dongle support it? You might need a level converter.
 @item @b{Pinout} What pinout does your target board use?
 Does your dongle support it? You may be able to use jumper
 wires, or an "octopus" connector, to convert pinouts.
-@item @b{Connection} Does your computer have the USB, printer, or
+@item @b{Connection} Does your computer have the USB, parallel, or
 Ethernet port needed?
 @item @b{RTCK} Do you expect to use it with ARM chips and boards with
-RTCK support? Also known as ``adaptive clocking''
+RTCK support (also known as ``adaptive clocking'')?
 @end enumerate
 
 @section Stand-alone JTAG Probe
 
 The ZY1000 from Ultimate Solutions is technically not a dongle but a
-stand-alone JTAG probe that unlikemost dongles doesn’t require any drivers
-running on the developers host computer.
+stand-alone JTAG probe that, unlike most dongles, doesn't require any drivers
+running on the developer's host computer.
 Once installed on a network using DHCP or a static IP assignment, users can
 access the ZY1000 probe locally or remotely from any host with access to the
 IP address assigned to the probe.
@@ -339,16 +355,16 @@ to power cycle the target remotely.
 
 For more information, visit:
 
-@b{ZY1000} See: @url{http://www.ultsol.com/index.php/component/content/article/8/33-zylin-zy1000-jtag-probe}
+@b{ZY1000} See: @url{http://www.ultsol.com/index.php/component/content/article/8/210-zylin-zy1000-main}
 
 @section USB FT2232 Based
 
-There are many USB JTAG dongles on the market, many of them are based
+There are many USB JTAG dongles on the market, many of them based
 on a chip from ``Future Technology Devices International'' (FTDI)
 known as the FTDI FT2232; this is a USB full speed (12 Mbps) chip.
 See: @url{http://www.ftdichip.com} for more information.
 In summer 2009, USB high speed (480 Mbps) versions of these FTDI
-chips are starting to become available in JTAG adapters. Around 2012 a new
+chips started to become available in JTAG adapters. Around 2012, a new
 variant appeared - FT232H - this is a single-channel version of FT2232H.
 (Adapters using those high speed FT2232H or FT232H chips may support adaptive
 clocking.)
@@ -360,7 +376,7 @@ and one can be used for a UART adapter at the same time the
 other one is used to provide a debug adapter.
 
 Also, some development boards integrate an FT2232 chip to serve as
-a built-in low cost debug adapter and usb-to-serial solution.
+a built-in low-cost debug adapter and USB-to-serial solution.
 
 @itemize @bullet
 @item @b{usbjtag}
@@ -410,15 +426,19 @@ to be available anymore as of April 2012.
 (OpenHardware).
 @item @b{JTAG-lock-pick Tiny 2}
 @* Link @url{http://www.distortec.com/jtag-lock-pick-tiny-2} FT232H-based
-@end itemize
 
+@item @b{GW16042}
+@* Link: @url{http://shop.gateworks.com/index.php?route=product/product&path=70_80&product_id=64}
+FT2232H-based
+
+@end itemize
 @section USB-JTAG / Altera USB-Blaster compatibles
 
 These devices also show up as FTDI devices, but are not
 protocol-compatible with the FT2232 devices. They are, however,
 protocol-compatible among themselves. USB-JTAG devices typically consist
 of a FT245 followed by a CPLD that understands a particular protocol,
-or emulate this protocol using some other hardware.
+or emulates this protocol using some other hardware.
 
 They may appear under different USB VID/PID depending on the particular
 product. The driver can be configured to search for any VID/PID pair
@@ -472,9 +492,9 @@ They only work with ST Micro chips, notably STM32 and STM8.
 @* Link: @url{http://www.st.com/internet/evalboard/product/251168.jsp}
 @end itemize
 
-For info the original ST-LINK enumerates using the mass storage usb class, however
-it's implementation is completely broken. The result is this causes issues under linux.
-The simplest solution is to get linux to ignore the ST-LINK using one of the following methods:
+For info the original ST-LINK enumerates using the mass storage usb class; however,
+its implementation is completely broken. The result is this causes issues under Linux.
+The simplest solution is to get Linux to ignore the ST-LINK using one of the following methods:
 @itemize @bullet
 @item modprobe -r usb-storage && modprobe usb-storage quirks=483:3744:i
 @item add "options usb-storage quirks=483:3744:i" to /etc/modprobe.conf
@@ -484,6 +504,10 @@ The simplest solution is to get linux to ignore the ST-LINK using one of the fol
 Texas Instruments has an adapter called @b{ICDI}.
 It is not to be confused with the FTDI based adapters that were originally fitted to their
 evaluation boards. This is the adapter fitted to the Stellaris LaunchPad.
+
+@section USB CMSIS-DAP based
+ARM has released a interface standard called CMSIS-DAP that simplifies connecting
+debuggers to ARM Cortex based targets @url{http://www.keil.com/support/man/docs/dapdebug/dapdebug_introduction.htm}.
 
 @section USB Other
 @itemize @bullet
@@ -514,7 +538,7 @@ evaluation boards. This is the adapter fitted to the Stellaris LaunchPad.
 
 @section IBM PC Parallel Printer Port Based
 
-The two well known ``JTAG Parallel Ports'' cables are the Xilnx DLC5
+The two well-known ``JTAG Parallel Ports'' cables are the Xilinx DLC5
 and the Macraigor Wiggler. There are many clones and variations of
 these on the market.
 
@@ -533,9 +557,6 @@ produced, PDF schematics are easily found and it is easy to make.
 
 @item @b{Amontec - JTAG Accelerator}
 @* Link: @url{http://www.amontec.com/jtag_accelerator.shtml}
-
-@item @b{GW16402}
-@* Link: @url{http://www.gateworks.com/products/avila_accessories/gw16042.php}
 
 @item @b{Wiggler2}
 @* Link: @url{http://www.ccac.rwth-aachen.de/~michaels/index.php/hardware/armjtag}
@@ -577,6 +598,10 @@ produced, PDF schematics are easily found and it is easy to make.
 @item @b{bcm2835gpio}
 @* A BCM2835-based board (e.g. Raspberry Pi) using the GPIO pins of the expansion header.
 
+@item @b{jtag_vpi}
+@* A JTAG driver acting as a client for the JTAG VPI server interface.
+@* Link: @url{http://github.com/fjullien/jtag_vpi}
+
 @end itemize
 
 @node About Jim-Tcl
@@ -591,9 +616,9 @@ command interpreter.
 All commands presented in this Guide are extensions to Jim-Tcl.
 You can use them as simple commands, without needing to learn
 much of anything about Tcl.
-Alternatively, can write Tcl programs with them.
+Alternatively, you can write Tcl programs with them.
 
-You can learn more about Jim at its website, @url{http://jim.berlios.de}.
+You can learn more about Jim at its website, @url{http://jim.tcl.tk}.
 There is an active and responsive community, get on the mailing list
 if you have any questions. Jim-Tcl maintainers also lurk on the
 OpenOCD mailing list.
@@ -615,7 +640,7 @@ enabled in OpenOCD.
 @item @b{Scripts}
 @* OpenOCD configuration scripts are Jim-Tcl Scripts. OpenOCD's
 command interpreter today is a mixture of (newer)
-Jim-Tcl commands, and (older) the orginal command interpreter.
+Jim-Tcl commands, and the (older) original command interpreter.
 
 @item @b{Commands}
 @* At the OpenOCD telnet command line (or via the GDB monitor command) one
@@ -625,9 +650,9 @@ as Tcl scripts, from a @file{startup.tcl} file internal to the server.
 
 @item @b{Historical Note}
 @* Jim-Tcl was introduced to OpenOCD in spring 2008. Fall 2010,
-before OpenOCD 0.5 release OpenOCD switched to using Jim Tcl
-as a git submodule, which greatly simplified upgrading Jim Tcl
-to benefit from new features and bugfixes in Jim Tcl.
+before OpenOCD 0.5 release, OpenOCD switched to using Jim-Tcl
+as a Git submodule, which greatly simplified upgrading Jim-Tcl
+to benefit from new features and bugfixes in Jim-Tcl.
 
 @item @b{Need a crash course in Tcl?}
 @*@xref{Tcl Crash Course}.
@@ -641,7 +666,9 @@ to benefit from new features and bugfixes in Jim Tcl.
 
 Properly installing OpenOCD sets up your operating system to grant it access
 to the debug adapters. On Linux, this usually involves installing a file
-in @file{/etc/udev/rules.d,} so OpenOCD has permissions. MS-Windows needs
+in @file{/etc/udev/rules.d,} so OpenOCD has permissions. An example rules file
+that works for many common adapters is shipped with OpenOCD in the
+@file{contrib} directory. MS-Windows needs
 complex and confusing driver configuration for every peripheral. Such issues
 are unique to each operating system, and are not detailed in this User's Guide.
 
@@ -695,10 +722,11 @@ customization even if this works. @xref{OpenOCD Project Setup}.
 
 If you find a script for your JTAG adapter, and for your board or
 target, you may be able to hook up your JTAG adapter then start
-the server like:
+the server with some variation of one of the following:
 
 @example
 openocd -f interface/ADAPTER.cfg -f board/MYBOARD.cfg
+openocd -f interface/ftdi/ADAPTER.cfg -f board/MYBOARD.cfg
 @end example
 
 You might also need to configure which reset signals are present,
@@ -761,10 +789,10 @@ correctly via e.g. GDB monitor commands in a GDB init script.
 @chapter OpenOCD Project Setup
 
 To use OpenOCD with your development projects, you need to do more than
-just connecting the JTAG adapter hardware (dongle) to your development board
-and then starting the OpenOCD server.
-You also need to configure that server so that it knows
-about that adapter and board, and helps your work.
+just connect the JTAG adapter hardware (dongle) to your development board
+and start the OpenOCD server.
+You also need to configure your OpenOCD server so that it knows
+about your adapter and board, and helps your work.
 You may also want to connect OpenOCD to GDB, possibly
 using Eclipse or some other GUI.
 
@@ -822,8 +850,9 @@ A USB, parallel, or serial port connector will go to the host which
 you are using to run OpenOCD.
 For Ethernet, consult the documentation and your network administrator.
 
-For USB based JTAG adapters you have an easy sanity check at this point:
-does the host operating system see the JTAG adapter? If that host is an
+For USB-based JTAG adapters you have an easy sanity check at this point:
+does the host operating system see the JTAG adapter? If you're running
+Linux, try the @command{lsusb} command. If that host is an
 MS-Windows host, you'll need to install a driver before OpenOCD works.
 
 @item @emph{Connect the adapter's power supply, if needed.}
@@ -980,7 +1009,7 @@ will help support users of any board using that chip.
 
 @item
 You may may need to write some C code.
-It may be as simple as a supporting a new ft2232 or parport
+It may be as simple as supporting a new FT2232 or parport
 based adapter; a bit more involved, like a NAND or NOR flash
 controller driver; or a big piece of work like supporting
 a new chip architecture.
@@ -1305,23 +1334,23 @@ hilscher_nxhx500_re.cfg   opendous_ftdi.cfg          vsllink.cfg
 hilscher_nxhx50_etm.cfg   openocd-usb.cfg            xds100v2.cfg
 
 interface/ftdi:
-axm0432.cfg               icebear.cfg                oocdlink.cfg
-calao-usb-a9260-c01.cfg   jtagkey2.cfg               opendous_ftdi.cfg
-calao-usb-a9260-c02.cfg   jtagkey2p.cfg              openocd-usb.cfg
-cortino.cfg               jtagkey.cfg                openocd-usb-hs.cfg
-dlp-usb1232h.cfg          jtag-lock-pick_tiny_2.cfg  openrd.cfg
-dp_busblaster.cfg         kt-link.cfg                redbee-econotag.cfg
-flossjtag.cfg             lisa-l.cfg                 redbee-usb.cfg
-flossjtag-noeeprom.cfg    luminary.cfg               sheevaplug.cfg
-flyswatter2.cfg           luminary-icdi.cfg          signalyzer.cfg
-flyswatter.cfg            luminary-lm3s811.cfg       signalyzer-lite.cfg
+axm0432.cfg               hitex_str9-comstick.cfg    olimex-jtag-tiny.cfg
+calao-usb-a9260-c01.cfg   icebear.cfg                oocdlink.cfg
+calao-usb-a9260-c02.cfg   jtagkey2.cfg               opendous_ftdi.cfg
+cortino.cfg               jtagkey2p.cfg              openocd-usb.cfg
+dlp-usb1232h.cfg          jtagkey.cfg                openocd-usb-hs.cfg
+dp_busblaster.cfg         jtag-lock-pick_tiny_2.cfg  openrd.cfg
+flossjtag.cfg             kt-link.cfg                redbee-econotag.cfg
+flossjtag-noeeprom.cfg    lisa-l.cfg                 redbee-usb.cfg
+flyswatter2.cfg           luminary.cfg               sheevaplug.cfg
+flyswatter.cfg            luminary-icdi.cfg          signalyzer.cfg
+gw16042.cfg               luminary-lm3s811.cfg       signalyzer-lite.cfg
 hilscher_nxhx10_etm.cfg   minimodule.cfg             stm32-stick.cfg
 hilscher_nxhx500_etm.cfg  neodb.cfg                  turtelizer2-revB.cfg
 hilscher_nxhx500_re.cfg   ngxtech.cfg                turtelizer2-revC.cfg
 hilscher_nxhx50_etm.cfg   olimex-arm-usb-ocd.cfg     vpaclink.cfg
 hilscher_nxhx50_re.cfg    olimex-arm-usb-ocd-h.cfg   xds100v2.cfg
 hitex_lpc1768stick.cfg    olimex-arm-usb-tiny-h.cfg
-hitex_str9-comstick.cfg   olimex-jtag-tiny.cfg
 $
 @end example
 @item @file{board} ...
@@ -1542,7 +1571,7 @@ about a given board that user config files need to know.
 In summary the board files should contain (if present)
 
 @enumerate
-@item One or more @command{source [target/...cfg]} statements
+@item One or more @command{source [find target/...cfg]} statements
 @item NOR flash configuration (@pxref{norconfiguration,,NOR Configuration})
 @item NAND flash configuration (@pxref{nandconfiguration,,NAND Configuration})
 @item Target @code{reset} handlers for SDRAM and I/O configuration
@@ -1740,16 +1769,16 @@ The concept of @code{init_board} procedure is very similar to @code{init_targets
 (@xref{theinittargetsprocedure,,The init_targets procedure}.) - it's a replacement of ``linear''
 configuration scripts. This procedure is meant to be executed when OpenOCD enters run stage
 (@xref{enteringtherunstage,,Entering the Run Stage},) after @code{init_targets}. The idea to have
-spearate @code{init_targets} and @code{init_board} procedures is to allow the first one to configure
+separate @code{init_targets} and @code{init_board} procedures is to allow the first one to configure
 everything target specific (internal flash, internal RAM, etc.) and the second one to configure
 everything board specific (reset signals, chip frequency, reset-init event handler, external memory, etc.).
 Additionally ``linear'' board config file will most likely fail when target config file uses
 @code{init_targets} scheme (``linear'' script is executed before @code{init} and @code{init_targets} - after),
 so separating these two configuration stages is very convenient, as the easiest way to overcome this
 problem is to convert board config file to use @code{init_board} procedure. Board config scripts don't
-need to override @code{init_targets} defined in target config files when they only need to to add some specifics.
+need to override @code{init_targets} defined in target config files when they only need to add some specifics.
 
-Just as @code{init_targets}, the @code{init_board} procedure can be overriden by ``next level'' script (which sources
+Just as @code{init_targets}, the @code{init_board} procedure can be overridden by ``next level'' script (which sources
 the original), allowing greater code reuse.
 
 @example
@@ -2080,6 +2109,17 @@ For an example of this scheme see LPC2000 target config files.
 The @code{init_boards} procedure is a similar concept concerning board config files
 (@xref{theinitboardprocedure,,The init_board procedure}.)
 
+@anchor{theinittargeteventsprocedure}
+@subsection The init_target_events procedure
+@cindex init_target_events procedure
+
+A special procedure called @code{init_target_events} is run just after
+@code{init_targets} (@xref{theinittargetsprocedure,,The init_targets
+procedure}.) and before @code{init_board}
+(@xref{theinitboardprocedure,,The init_board procedure}.) It is used
+to set up default target events for the targets that do not have those
+events already assigned.
+
 @subsection ARM Core Specific Hacks
 
 If the chip has a DCC, enable it. If the chip is an ARM9 with some
@@ -2353,6 +2393,17 @@ The default behaviour is @option{disable};
 use @option{enable} see these errors reported.
 @end deffn
 
+@deffn {Config Command} gdb_target_description (@option{enable}|@option{disable})
+Set to @option{enable} to cause OpenOCD to send the target descriptions to gdb via qXfer:features:read packet.
+The default behaviour is @option{disable}.
+@end deffn
+
+@deffn {Command} gdb_save_tdesc
+Saves the target descripton file to the local file system.
+
+The file name is @i{target_name}.xml.
+@end deffn
+
 @anchor{eventpolling}
 @section Event Polling
 
@@ -2520,6 +2571,23 @@ presuming that system is an Atmel AT91rm9200
 and a specific set of GPIOs is used.
 @c command:	at91rm9200_device NAME
 @c chooses among list of bit configs ... only one option
+@end deffn
+
+@deffn {Interface Driver} {cmsis-dap}
+ARM CMSIS-DAP compliant based adapter.
+
+@deffn {Config Command} {cmsis_dap_vid_pid} [vid pid]+
+The vendor ID and product ID of the CMSIS-DAP device. If not specified
+the driver will attempt to auto detect the CMSIS-DAP device.
+Currently, up to eight [@var{vid}, @var{pid}] pairs may be given, e.g.
+@example
+cmsis_dap_vid_pid 0xc251 0xf001 0x0d28 0x0204
+@end example
+@end deffn
+
+@deffn {Command} {cmsis-dap info}
+Display various device information, like hardware version, firmware version, current bus status.
+@end deffn
 @end deffn
 
 @deffn {Interface Driver} {dummy}
@@ -2699,7 +2767,7 @@ minimal impact on the target system. Avoid floating inputs, conflicting outputs
 and initially asserted reset signals.
 @end deffn
 
-@deffn {Config Command} {ftdi_layout_signal} name [@option{-data}|@option{-ndata} data_mask] [@option{-oe}|@option{-noe} oe_mask]
+@deffn {Config Command} {ftdi_layout_signal} name [@option{-data}|@option{-ndata} data_mask] [@option{-oe}|@option{-noe} oe_mask] [@option{-alias}|@option{-nalias} name]
 Creates a signal with the specified @var{name}, controlled by one or more FTDI
 GPIO pins via a range of possible buffer connections. The masks are FTDI GPIO
 register bitmasks to tell the driver the connection and type of the output
@@ -2722,6 +2790,10 @@ target without any buffer. The FTDI pin is then switched between output and
 input as necessary to provide the full set of low, high and Hi-Z
 characteristics. In all other cases, the pins specified in a signal definition
 are always driven by the FTDI.
+
+If @option{-alias} or @option{-nalias} is used, the signal is created
+identical (or with data inverted) to an already specified signal
+@var{name}.
 @end deffn
 
 @deffn {Command} {ftdi_set_signal} name @option{0}|@option{1}|@option{z}
@@ -3024,8 +3096,11 @@ Specifies the adapter layout to use.
 The vendor ID and product ID of the device.
 @end deffn
 
-@deffn {Config Command} {stlink_api} api_level
-Manually sets the stlink api used, valid options are 1 or 2. (@b{STLINK Only}).
+@deffn {Config Command} {trace} source_clock_hz [output_file_path]
+Enable SWO tracing (if supported). The source clock rate for the
+trace port must be specified, this is typically the CPU clock rate. If
+the optional output file is specified then raw trace data is appended
+to the file, and the file is created if it does not exist.
 @end deffn
 @end deffn
 
@@ -3081,7 +3156,7 @@ version of OpenOCD.
 @deffn Command {transport select} transport_name
 Select which of the supported transports to use in this OpenOCD session.
 The transport must be supported by the debug adapter hardware and by the
-version of OPenOCD you are using (including the adapter's driver).
+version of OpenOCD you are using (including the adapter's driver).
 No arguments: returns name of session's selected transport.
 @end deffn
 
@@ -3112,6 +3187,11 @@ Updates TRN (turnaraound delay) and prescaling.fields of the
 Wire Control Register (WCR).
 No parameters: displays current settings.
 @end deffn
+
+@subsection CMSIS-DAP Transport
+@cindex CMSIS-DAP
+CMSIS-DAP is an ARM-specific transport that is used to connect to
+compilant debuggers.
 
 @subsection SPI Transport
 @cindex SPI
@@ -3545,15 +3625,15 @@ It then invokes the logic of @command{jtag arp_init}.
 TAPs serve many roles, including:
 
 @itemize @bullet
-@item @b{Debug Target} A CPU TAP can be used as a GDB debug target
-@item @b{Flash Programing} Some chips program the flash directly via JTAG.
+@item @b{Debug Target} A CPU TAP can be used as a GDB debug target.
+@item @b{Flash Programming} Some chips program the flash directly via JTAG.
 Others do it indirectly, making a CPU do it.
 @item @b{Program Download} Using the same CPU support GDB uses,
 you can initialize a DRAM controller, download code to DRAM, and then
 start running that code.
 @item @b{Boundary Scan} Most chips support boundary scan, which
 helps test for board assembly problems like solder bridges
-and missing connections
+and missing connections.
 @end itemize
 
 OpenOCD must know about the active TAPs on your board(s).
@@ -3566,7 +3646,7 @@ probes flash memory, performs low-level JTAG operations, and more.
 @cindex scan chain
 
 TAPs are part of a hardware @dfn{scan chain},
-which is daisy chain of TAPs.
+which is a daisy chain of TAPs.
 They also need to be added to
 OpenOCD's software mirror of that hardware list,
 giving each member a name and associating other data with it.
@@ -3594,7 +3674,7 @@ Here's what the scan chain might look like for a chip more than one TAP:
 
 OpenOCD can detect some of that information, but not all
 of it. @xref{autoprobing,,Autoprobing}.
-Unfortunately those TAPs can't always be autoconfigured,
+Unfortunately, those TAPs can't always be autoconfigured,
 because not all devices provide good support for that.
 JTAG doesn't require supporting IDCODE instructions, and
 chips with JTAG routers may not link TAPs into the chain
@@ -3614,8 +3694,8 @@ by a given chip.
 Board configuration files combine all the targets on a board,
 and so forth.
 Note that @emph{the order in which TAPs are declared is very important.}
-It must match the order in the JTAG scan chain, both inside
-a single chip and between them.
+That declaration order must match the order in the JTAG scan chain,
+both inside a single chip and between them.
 @xref{faqtaporder,,FAQ TAP Order}.
 
 For example, the ST Microsystems STR912 chip has
@@ -3632,9 +3712,9 @@ jtag newtap str912 cpu ... params ...
 jtag newtap str912 bs ... params ...
 @end example
 
-Actual config files use a variable instead of literals like
-@option{str912}, to support more than one chip of each type.
-@xref{Config File Guidelines}.
+Actual config files typically use a variable such as @code{$_CHIPNAME}
+instead of literals like @option{str912}, to support more than one chip
+of each type.  @xref{Config File Guidelines}.
 
 @deffn Command {jtag names}
 Returns the names of all current TAPs in the scan chain.
@@ -3678,17 +3758,6 @@ The components of a dotted name should follow ``C'' symbol
 name rules: start with an alphabetic character, then numbers
 and underscores are OK; while others (including dots!) are not.
 
-@quotation Tip
-In older code, JTAG TAPs were numbered from 0..N.
-This feature is still present.
-However its use is highly discouraged, and
-should not be relied on; it will be removed by mid-2010.
-Update all of your scripts to use TAP names rather than numbers,
-by paying attention to the runtime warnings they trigger.
-Using TAP numbers in target configuration scripts prevents
-reusing those scripts on boards with multiple targets.
-@end quotation
-
 @section TAP Declaration Commands
 
 @c shouldn't this be(come) a {Config Command}?
@@ -3706,19 +3775,19 @@ The @var{tapname} reflects the role of that TAP,
 and should follow this convention:
 
 @itemize @bullet
-@item @code{bs} -- For boundary scan if this is a seperate TAP;
+@item @code{bs} -- For boundary scan if this is a separate TAP;
 @item @code{cpu} -- The main CPU of the chip, alternatively
 @code{arm} and @code{dsp} on chips with both ARM and DSP CPUs,
-@code{arm1} and @code{arm2} on chips two ARMs, and so forth;
+@code{arm1} and @code{arm2} on chips with two ARMs, and so forth;
 @item @code{etb} -- For an embedded trace buffer (example: an ARM ETB11);
 @item @code{flash} -- If the chip has a flash TAP, like the str912;
-@item @code{jrc} -- For JTAG route controller (example: the ICEpick modules
+@item @code{jrc} -- For JTAG route controller (example: the ICEPick modules
 on many Texas Instruments chips, like the OMAP3530 on Beagleboards);
-@item @code{tap} -- Should be used only FPGA or CPLD like devices
+@item @code{tap} -- Should be used only for FPGA- or CPLD-like devices
 with a single TAP;
 @item @code{unknownN} -- If you have no idea what the TAP is for (N is a number);
 @item @emph{when in doubt} -- Use the chip maker's name in their data sheet.
-For example, the Freescale IMX31 has a SDMA (Smart DMA) with
+For example, the Freescale i.MX31 has a SDMA (Smart DMA) with
 a JTAG TAP; that TAP should be named @code{sdma}.
 @end itemize
 
@@ -3735,12 +3804,12 @@ A TAP may also provide optional @var{configparams}:
 @itemize @bullet
 @item @code{-disable} (or @code{-enable})
 @*Use the @code{-disable} parameter to flag a TAP which is not
-linked in to the scan chain after a reset using either TRST
+linked into the scan chain after a reset using either TRST
 or the JTAG state machine's @sc{reset} state.
 You may use @code{-enable} to highlight the default state
 (the TAP is linked in).
 @xref{enablinganddisablingtaps,,Enabling and Disabling TAPs}.
-@item @code{-expected-id} @var{number}
+@item @code{-expected-id} @var{NUMBER}
 @*A non-zero @var{number} represents a 32-bit IDCODE
 which you expect to find when the scan chain is examined.
 These codes are not required by all JTAG devices.
@@ -3767,7 +3836,7 @@ on entry to the @sc{ircapture} state, such as 0x01.
 JTAG requires the two LSBs of this value to be 01.
 By default, @code{-ircapture} and @code{-irmask} are set
 up to verify that two-bit value. You may provide
-additional bits, if you know them, or indicate that
+additional bits if you know them, or indicate that
 a TAP doesn't conform to the JTAG specification.
 @item @code{-irmask} @var{NUMBER}
 @*A mask used with @code{-ircapture}
@@ -3779,8 +3848,8 @@ there seems to be no problems with JTAG scan chain operations.
 
 @section Other TAP commands
 
-@deffn Command {jtag cget} dotted.name @option{-event} name
-@deffnx Command {jtag configure} dotted.name @option{-event} name string
+@deffn Command {jtag cget} dotted.name @option{-event} event_name
+@deffnx Command {jtag configure} dotted.name @option{-event} event_name handler
 At this writing this TAP attribute
 mechanism is used only for event handling.
 (It is not a direct analogue of the @code{cget}/@code{configure}
@@ -3828,7 +3897,7 @@ implement @command{jtag tapenable}
 by issuing the relevant JTAG commands.
 @end itemize
 
-If you need some action after each JTAG reset, which isn't actually
+If you need some action after each JTAG reset which isn't actually
 specific to any TAP (since you can't yet trust the scan chain's
 contents to be accurate), you might:
 
@@ -3847,8 +3916,8 @@ jtag configure CHIP.jrc -event post-reset @{
 
 In some systems, a @dfn{JTAG Route Controller} (JRC)
 is used to enable and/or disable specific JTAG TAPs.
-Many ARM based chips from Texas Instruments include
-an ``ICEpick'' module, which is a JRC.
+Many ARM-based chips from Texas Instruments include
+an ``ICEPick'' module, which is a JRC.
 Such chips include DaVinci and OMAP3 processors.
 
 A given TAP may not be visible until the JRC has been
@@ -4156,6 +4225,18 @@ There are several variants defined:
 @code{pxa26x} ... instruction register length is 5 bits
 @item @code{pxa3xx} ... instruction register length is 11 bits
 @end itemize
+@item @code{openrisc} -- this is an OpenRISC 1000 core.
+The current implementation supports three JTAG TAP cores:
+@itemize @minus
+@item @code{OpenCores TAP} (See: @emph{http://opencores.org/project,jtag})
+@item @code{Altera Virtual JTAG TAP} (See: @emph{http://www.altera.com/literature/ug/ug_virtualjtag.pdf})
+@item @code{Xilinx BSCAN_* virtual JTAG interface} (See: @emph{http://www.xilinx.com/support/documentation/sw_manuals/xilinx14_2/spartan6_hdl.pdf})
+@end itemize
+And two debug interfaces cores:
+@itemize @minus
+@item @code{Advanced debug interface} (See: @emph{http://opencores.org/project,adv_debug_sys})
+@item @code{SoC Debug Interface} (See: @emph{http://opencores.org/project,dbg_interface})
+@end itemize
 @end itemize
 @end deffn
 
@@ -4299,9 +4380,11 @@ base @var{address} to be used when an MMU is active.
 The value should normally correspond to a static mapping for the
 @code{-work-area-phys} address, set up by the current operating system.
 
+@anchor{rtostype}
 @item @code{-rtos} @var{rtos_type} -- enable rtos support for target,
 @var{rtos_type} can be one of @option{auto}|@option{eCos}|@option{ThreadX}|
-@option{FreeRTOS}|@option{linux}|@option{ChibiOS}.
+@option{FreeRTOS}|@option{linux}|@option{ChibiOS}|@option{embKernel}
+@xref{gdbrtossupport,,RTOS Support}.
 
 @end itemize
 @end deffn
@@ -4509,13 +4592,14 @@ depending on whether the breakpoint is in RAM or read only memory.
 @item @b{gdb-end}
 @* When the target has halted and GDB is not doing anything (see early halt)
 @item @b{gdb-flash-erase-start}
-@* Before the GDB flash process tries to erase the flash
+@* Before the GDB flash process tries to erase the flash (default is
+@code{reset init})
 @item @b{gdb-flash-erase-end}
 @* After the GDB flash process has finished erasing the flash
 @item @b{gdb-flash-write-start}
 @* Before GDB writes to the flash
 @item @b{gdb-flash-write-end}
-@* After GDB writes to the flash
+@* After GDB writes to the flash (default is @code{reset halt})
 @item @b{gdb-start}
 @* Before the target steps, gdb is trying to start/resume the target
 @item @b{halted}
@@ -4826,6 +4910,12 @@ specifies "to the end of the flash bank".
 The @var{num} parameter is a value shown by @command{flash banks}.
 @end deffn
 
+@deffn Command {flash padded_value} num value
+Sets the default value used for padding any image sections, This should
+normally match the flash bank erased value. If not specified by this
+comamnd or the flash driver then it defaults to 0xff.
+@end deffn
+
 @anchor{program}
 @deffn Command {program} filename [verify] [reset] [offset]
 This is a helper script that simplifies using OpenOCD as a standalone
@@ -5087,9 +5177,10 @@ supported.}
 @end deffn
 
 @deffn {Flash Driver} lpc2000
-Most members of the LPC1700, LPC1800, LPC2000 and LPC4300 microcontroller
-families from NXP include internal flash and use Cortex-M3 (LPC1700, LPC1800),
-Cortex-M4 (LPC4300) or ARM7TDMI (LPC2000) cores.
+All members of the LPC11(x)00 and LPC1300 microcontroller families and most members
+of the LPC1700, LPC1800, LPC2000 and LPC4300 microcontroller families from NXP
+include internal flash and use Cortex-M0 (LPC11(x)00), Cortex-M3 (LPC1300, LPC1700,
+LPC1800), Cortex-M4 (LPC4300) or ARM7TDMI (LPC2000) cores.
 
 @quotation Note
 There are LPC2000 devices which are not supported by the @var{lpc2000}
@@ -5106,8 +5197,11 @@ which must appear in the following order:
 @option{lpc2000_v1} (older LPC21xx and LPC22xx)
 @option{lpc2000_v2} (LPC213x, LPC214x, LPC210[123], LPC23xx and LPC24xx)
 @option{lpc1700} (LPC175x and LPC176x)
-or @option{lpc4300} - available also as @option{lpc1800} alias (LPC18x[2357] and
+@option{lpc4300} - available also as @option{lpc1800} alias (LPC18x[2357] and
 LPC43x[2357])
+@option{lpc1100} (LPC11(x)xx and LPC13xx)
+or @option{auto} - automatically detects flash variant and size for LPC11(x)00,
+LPC1300 and LPC1700
 @item @var{clock_kHz} ... the frequency, in kiloHertz,
 at which the core is running
 @item @option{calc_checksum} ... optional (but you probably want to provide this!),
@@ -5615,6 +5709,23 @@ unlock str9 device.
 
 @end deffn
 
+@deffn {Flash Driver} nrf51
+All members of the nRF51 microcontroller families from Nordic Semiconductor
+include internal flash and use ARM Cortex-M0 core.
+
+@example
+flash bank $_FLASHNAME nrf51 0 0x00000000 0 0 $_TARGETNAME
+@end example
+
+Some nrf51-specific commands are defined:
+
+@deffn Command {nrf51 mass_erase}
+Erases the contents of the code memory and user information
+configuration registers as well. It must be noted that this command
+works only for chips that do not have factory pre-programmed region 0
+code.
+@end deffn
+@end deffn
 
 @section mFlash
 
@@ -6300,7 +6411,7 @@ various operations. The current target may be changed
 by using @command{targets} command with the name of the
 target which should become current.
 
-@deffn Command reg [(number|name) [value]]
+@deffn Command reg [(number|name) [(value|'force')]]
 Access a single register by @var{number} or by its @var{name}.
 The target must generally be halted before access to CPU core
 registers is allowed. Depending on the hardware, some other
@@ -6314,6 +6425,8 @@ which are also dirty (and will be written back later)
 are flagged as such.
 
 @emph{With number/name}: display that register's value.
+Use @var{force} argument to read directly from the target,
+bypassing any internal cache.
 
 @emph{With both number/name and value}: set register's value.
 Writes may be held in a writeback cache internal to OpenOCD,
@@ -6618,10 +6731,12 @@ using @var{mask} to mark ``don't care'' fields.
 @section Misc Commands
 
 @cindex profiling
-@deffn Command {profile} seconds filename
+@deffn Command {profile} seconds filename [start end]
 Profiling samples the CPU's program counter as quickly as possible,
 which is useful for non-intrusive stochastic profiling.
-Saves up to 10000 sampines in @file{filename} using ``gmon.out'' format.
+Saves up to 10000 samples in @file{filename} using ``gmon.out''
+format. Optional @option{start} and @option{end} parameters allow to
+limit the address range.
 @end deffn
 
 @deffn Command {version}
@@ -7468,6 +7583,92 @@ the peripherals.
 @xref{targetevents,,Target Events}.
 @end deffn
 
+@section Intel Architecture
+
+Intel Quark X10xx is the first product in the Quark family of SoCs. It is an IA-32
+(Pentium x86 ISA) compatible SoC. The core CPU in the X10xx is codenamed Lakemont.
+Lakemont version 1 (LMT1) is used in X10xx. The CPU TAP (Lakemont TAP) is used for
+software debug and the CLTAP is used for SoC level operations.
+Useful docs are here: https://communities.intel.com/community/makers/documentation
+@itemize
+@item Intel Quark SoC X1000 OpenOCD/GDB/Eclipse App Note (web search for doc num 330015)
+@item Intel Quark SoC X1000 Debug Operations User Guide (web search for doc num 329866)
+@item Intel Quark SoC X1000 Datasheet (web search for doc num 329676)
+@end itemize
+
+@subsection x86 32-bit specific commands
+The three main address spaces for x86 are memory, I/O and configuration space.
+These commands allow a user to read and write to the 64Kbyte I/O address space.
+
+@deffn Command {x86_32 idw} address
+Display the contents of a 32-bit I/O port from address range 0x0000 - 0xffff.
+@end deffn
+
+@deffn Command {x86_32 idh} address
+Display the contents of a 16-bit I/O port from address range 0x0000 - 0xffff.
+@end deffn
+
+@deffn Command {x86_32 idb} address
+Display the contents of a 8-bit I/O port from address range 0x0000 - 0xffff.
+@end deffn
+
+@deffn Command {x86_32 iww} address
+Write the contents of a 32-bit I/O port to address range 0x0000 - 0xffff.
+@end deffn
+
+@deffn Command {x86_32 iwh} address
+Write the contents of a 16-bit I/O port to address range 0x0000 - 0xffff.
+@end deffn
+
+@deffn Command {x86_32 iwb} address
+Write the contents of a 8-bit I/O port to address range 0x0000 - 0xffff.
+@end deffn
+
+@section OpenRISC Architecture
+
+The OpenRISC CPU is a soft core. It is used in a programmable SoC which can be
+configured with any of the TAP / Debug Unit available.
+
+@subsection TAP and Debug Unit selection commands
+@deffn Command {tap_select} (@option{vjtag}|@option{mohor}|@option{xilinx_bscan})
+Select between the Altera Virtual JTAG , Xilinx Virtual JTAG and Mohor TAP.
+@end deffn
+@deffn Command {du_select} (@option{adv}|@option{mohor}) [option]
+Select between the Advanced Debug Interface and the classic one.
+
+An option can be passed as a second argument to the debug unit.
+
+When using the Advanced Debug Interface, option = 1 means the RTL core is
+configured with ADBG_USE_HISPEED = 1. This configuration skips status checking
+between bytes while doing read or write bursts.
+@end deffn
+
+@subsection Registers commands
+@deffn Command {addreg} [name] [address] [feature] [reg_group]
+Add a new register in the cpu register list. This register will be
+included in the generated target descriptor file.
+
+@strong{[feature]} must be "org.gnu.gdb.or1k.group[0..10]".
+
+@strong{[reg_group]} can be anything. The default register list defines "system",
+ "dmmu", "immu", "dcache", "icache", "mac", "debug", "perf", "power", "pic"
+ and "timer" groups.
+
+@emph{example:}
+@example
+addreg rtest 0x1234 org.gnu.gdb.or1k.group0 system
+@end example
+
+
+@end deffn
+@deffn Command {readgroup} (@option{group})
+Display all registers in @emph{group}.
+
+@emph{group} can be "system",
+ "dmmu", "immu", "dcache", "icache", "mac", "debug", "perf", "power", "pic",
+ "timer" or any new group created with addreg command.
+@end deffn
+
 @anchor{softwaredebugmessagesandtracing}
 @section Software Debug Messages and Tracing
 @cindex Linux-ARM DCC support
@@ -7839,10 +8040,68 @@ If @emph{xsvfdump} shows a file is using those opcodes, it
 probably will not be usable with other XSVF tools.
 
 
+@node Utility Commands
+@chapter Utility Commands
+@cindex Utility Commands
+
+@section RAM testing
+@cindex RAM testing
+
+There is often a need to stress-test random access memory (RAM) for
+errors. OpenOCD comes with a Tcl implementation of well-known memory
+testing procedures allowing the detection of all sorts of issues with
+electrical wiring, defective chips, PCB layout and other common
+hardware problems.
+
+To use them, you usually need to initialise your RAM controller first;
+consult your SoC's documentation to get the recommended list of
+register operations and translate them to the corresponding
+@command{mww}/@command{mwb} commands.
+
+Load the memory testing functions with
+
+@example
+source [find tools/memtest.tcl]
+@end example
+
+to get access to the following facilities:
+
+@deffn Command {memTestDataBus} address
+Test the data bus wiring in a memory region by performing a walking
+1's test at a fixed address within that region.
+@end deffn
+
+@deffn Command {memTestAddressBus} baseaddress size
+Perform a walking 1's test on the relevant bits of the address and
+check for aliasing. This test will find single-bit address failures
+such as stuck-high, stuck-low, and shorted pins.
+@end deffn
+
+@deffn Command {memTestDevice} baseaddress size
+Test the integrity of a physical memory device by performing an
+increment/decrement test over the entire region. In the process every
+storage bit in the device is tested as zero and as one.
+@end deffn
+
+@deffn Command {runAllMemTests} baseaddress size
+Run all of the above tests over a specified memory region.
+@end deffn
+
+@section Firmware recovery helpers
+@cindex Firmware recovery
+
+OpenOCD includes an easy-to-use script to facilitate mass-market
+devices recovery with JTAG.
+
+For quickstart instructions run:
+@example
+openocd -f tools/firmware-recovery.tcl -c firmware_help
+@end example
+
 @node TFTP
 @chapter TFTP
 @cindex TFTP
-If OpenOCD runs on an embedded host(as ZY1000 does), then TFTP can
+If OpenOCD runs on an embedded host (as ZY1000 does), then TFTP can
 be used to access files on PCs (either the developer's PC or some other PC).
 
 The way this works on the ZY1000 is to prefix a filename by
@@ -7864,7 +8123,7 @@ a bit of googling to find something that fits your requirements.
 @node GDB and OpenOCD
 @chapter GDB and OpenOCD
 @cindex GDB
-OpenOCD complies with the remote gdbserver protocol, and as such can be used
+OpenOCD complies with the remote gdbserver protocol and, as such, can be used
 to debug remote targets.
 Setting up GDB to work with OpenOCD can involve several components:
 
@@ -7923,7 +8182,7 @@ GDB command line.
 
 With the remote protocol, GDB sessions start a little differently
 than they do when you're debugging locally.
-Here's an examples showing how to start a debug session with a
+Here's an example showing how to start a debug session with a
 small ARM program.
 In this case the program was linked to be loaded into SRAM on a Cortex-M3.
 Most programs would be written into flash (address 0) and run from there.
@@ -8016,7 +8275,7 @@ flash areas of the target and use hardware breakpoints by default. This means
 that the OpenOCD option @command{gdb_breakpoint_override} is not required when
 using a memory map. @xref{gdbbreakpointoverride,,gdb_breakpoint_override}.
 
-To view the configured memory map in GDB, use the GDB command @option{info mem}
+To view the configured memory map in GDB, use the GDB command @option{info mem}.
 All other unassigned addresses within GDB are treated as RAM.
 
 GDB 6.8 and higher set any memory area not in the memory map as inaccessible.
@@ -8089,6 +8348,57 @@ end
 @end example
 @end itemize
 
+@section RTOS Support
+@cindex RTOS Support
+@anchor{gdbrtossupport}
+
+OpenOCD includes RTOS support, this will however need enabling as it defaults to disabled.
+It can be enabled by passing @option{-rtos} arg to the target @xref{rtostype,,RTOS Type}.
+
+@* An example setup is below:
+
+@example
+$_TARGETNAME configure -rtos auto
+@end example
+
+This will attempt to auto detect the RTOS within your application.
+
+Currently supported rtos's include:
+@itemize @bullet
+@item @option{eCos}
+@item @option{ThreadX}
+@item @option{FreeRTOS}
+@item @option{linux}
+@item @option{ChibiOS}
+@item @option{embKernel}
+@end itemize
+
+@quotation Note
+Before an RTOS can be detected, it must export certain symbols; otherwise, it cannot
+be used by OpenOCD. Below is a list of the required symbols for each supported RTOS.
+@end quotation
+
+@table @code
+@item eCos symbols
+Cyg_Thread::thread_list, Cyg_Scheduler_Base::current_thread.
+@item ThreadX symbols
+_tx_thread_current_ptr, _tx_thread_created_ptr, _tx_thread_created_count.
+@item FreeRTOS symbols
+pxCurrentTCB, pxReadyTasksLists, xDelayedTaskList1, xDelayedTaskList2,
+pxDelayedTaskList, pxOverflowDelayedTaskList, xPendingReadyList,
+xTasksWaitingTermination, xSuspendedTaskList, uxCurrentNumberOfTasks, uxTopUsedPriority.
+@item linux symbols
+init_task.
+@item ChibiOS symbols
+rlist, ch_debug, chSysInit.
+@item embKernel symbols
+Rtos::sCurrentTask, Rtos::sListReady, Rtos::sListSleep,
+Rtos::sListSuspended, Rtos::sMaxPriorities, Rtos::sCurrentTaskCount.
+@end table
+
+For most RTOS supported the above symbols will be exported by default. However for
+some, eg. FreeRTOS @option{xTasksWaitingTermination} is only exported
+if @option{INCLUDE_vTaskDelete} is defined during the build.
 
 @node Tcl Scripting API
 @chapter Tcl Scripting API
@@ -8096,9 +8406,9 @@ end
 @cindex Tcl scripts
 @section API rules
 
-The commands are stateless. E.g. the telnet command line has a concept
-of currently active target, the Tcl API proc's take this sort of state
-information as an argument to each proc.
+Tcl commands are stateless; e.g. the @command{telnet} command has
+a concept of currently active target, the Tcl API proc's take this sort
+of state information as an argument to each proc.
 
 There are three main types of return values: single value, name value
 pair list and lists.
@@ -8106,38 +8416,44 @@ pair list and lists.
 Name value pair. The proc 'foo' below returns a name/value pair
 list.
 
-@verbatim
-
- >  set foo(me)  Duane
- >  set foo(you) Oyvind
- >  set foo(mouse) Micky
- >  set foo(duck) Donald
+@example
+>  set foo(me)  Duane
+>  set foo(you) Oyvind
+>  set foo(mouse) Micky
+>  set foo(duck) Donald
+@end example
 
 If one does this:
 
- >  set foo
+@example
+>  set foo
+@end example
 
 The result is:
 
-    me Duane you Oyvind mouse Micky duck Donald
+@example
+me Duane you Oyvind mouse Micky duck Donald
+@end example
 
 Thus, to get the names of the associative array is easy:
 
-     foreach { name value } [set foo] {
-                puts "Name: $name, Value: $value"
-     }
+@verbatim
+foreach { name value } [set foo] {
+        puts "Name: $name, Value: $value"
+}
 @end verbatim
 
-Lists returned must be relatively small. Otherwise a range
+Lists returned should be relatively small. Otherwise, a range
 should be passed in to the proc in question.
 
 @section Internal low-level Commands
 
-By low-level, the intent is a human would not directly use these commands.
+By "low-level," we mean commands that a human would typically not
+invoke directly.
 
-Low-level commands are (should be) prefixed with "ocd_", e.g.
+Some low-level commands need to be prefixed with "ocd_"; e.g.
 @command{ocd_flash_banks}
-is the low level API upon which @command{flash banks} is implemented.
+is the low-level API upon which @command{flash banks} is implemented.
 
 @itemize @bullet
 @item @b{mem2array} <@var{varname}> <@var{width}> <@var{addr}> <@var{nelems}>
@@ -8149,6 +8465,16 @@ Convert a Tcl array to memory locations and write the values
 @item @b{ocd_flash_banks} <@var{driver}> <@var{base}> <@var{size}> <@var{chip_width}> <@var{bus_width}> <@var{target}> [@option{driver options} ...]
 
 Return information about the flash banks
+
+@item @b{capture} <@var{command}>
+
+Run <@var{command}> and return full log output that was produced during
+its execution. Example:
+
+@example
+> capture "reset init"
+@end example
+
 @end itemize
 
 OpenOCD commands can consist of two words, e.g. "flash banks". The
@@ -8165,9 +8491,12 @@ holds one of the following values:
 @item @b{cygwin}   Running under Cygwin
 @item @b{darwin}   Darwin (Mac-OS) is the underlying operating sytem.
 @item @b{freebsd}  Running under FreeBSD
+@item @b{openbsd}  Running under OpenBSD
+@item @b{netbsd}   Running under NetBSD
 @item @b{linux}    Linux is the underlying operating sytem
 @item @b{mingw32}  Running under MingW32
 @item @b{winxx}    Built using Microsoft Visual Studio
+@item @b{ecos}     Running under eCos
 @item @b{other}    Unknown, none of the above.
 @end itemize
 
@@ -8179,6 +8508,24 @@ We should add support for a variable like Tcl variable
 @code{jim_platform} (because it
 is jim, not real tcl).
 @end quotation
+
+@section Tcl RPC server
+@cindex RPC
+
+OpenOCD provides a simple RPC server that allows to run arbitrary Tcl
+commands and receive the results.
+
+To access it, your application needs to connect to a configured TCP port
+(see @command{tcl_port}). Then it can pass any string to the
+interpreter terminating it with @code{0x1a} and wait for the return
+value (it will be terminated with @code{0x1a} as well). This can be
+repeated as many times as desired without reopening the connection.
+
+Remember that most of the OpenOCD commands need to be prefixed with
+@code{ocd_} to get the results back. Sometimes you might also need the
+@command{capture} command.
+
+See @file{contrib/rpc_examples/} for specific client implementations.
 
 @node FAQ
 @chapter FAQ

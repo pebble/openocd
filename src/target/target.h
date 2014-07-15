@@ -41,6 +41,7 @@ struct watchpoint;
 struct mem_param;
 struct reg_param;
 struct target_list;
+struct gdb_fileio_info;
 
 /*
  * TARGET_UNKNOWN = 0: we don't know anything about the target yet
@@ -82,7 +83,8 @@ enum target_debug_reason {
 	DBG_REASON_WPTANDBKPT = 3,
 	DBG_REASON_SINGLESTEP = 4,
 	DBG_REASON_NOTHALTED = 5,
-	DBG_REASON_UNDEFINED = 6
+	DBG_REASON_EXIT = 6,
+	DBG_REASON_UNDEFINED = 7,
 };
 
 enum target_endianness {
@@ -114,6 +116,12 @@ struct backoff_timer {
 	int count;
 };
 
+/* split target registers into multiple class */
+enum target_register_class {
+	REG_CLASS_ALL,
+	REG_CLASS_GENERAL,
+};
+
 /* target_type.h contains the full definition of struct target_type */
 struct target {
 	struct target_type *type;			/* target type definition (name, access functions) */
@@ -121,7 +129,7 @@ struct target {
 	int target_number;					/* DO NOT USE!  field to be removed in 2010 */
 	struct jtag_tap *tap;				/* where on the jtag chain is this */
 	int32_t coreid;						/* which device on the TAP? */
-	const char *variant;				/* what variant of this chip is it? */
+	char *variant;						/* what variant of this chip is it? */
 
 	/**
 	 * Indicates whether this target has been examined.
@@ -185,11 +193,22 @@ struct target {
 	 * the target attached to the gdb is changing dynamically by changing
 	 * gdb_service->target pointer */
 	struct gdb_service *gdb_service;
+
+	/* file-I/O information for host to do syscall */
+	struct gdb_fileio_info *fileio_info;
 };
 
 struct target_list {
 	struct target *target;
 	struct target_list *next;
+};
+
+struct gdb_fileio_info {
+	char *identifier;
+	uint32_t param_1;
+	uint32_t param_2;
+	uint32_t param_3;
+	uint32_t param_4;
 };
 
 /** Returns the instance-specific name of the specified target. */
@@ -309,7 +328,7 @@ int target_call_event_callbacks(struct target *target, enum target_event event);
  */
 int target_register_timer_callback(int (*callback)(void *priv),
 		int time_ms, int periodic, void *priv);
-
+int target_unregister_timer_callback(int (*callback)(void *priv), void *priv);
 int target_call_timer_callbacks(void);
 /**
  * Invoke this to ensure that e.g. polling timer callbacks happen before
@@ -394,12 +413,21 @@ int target_remove_watchpoint(struct target *target,
 		struct watchpoint *watchpoint);
 
 /**
+ * Find out the just hit @a watchpoint for @a target.
+ *
+ * This routine is a wrapper for target->type->hit_watchpoint.
+ */
+int target_hit_watchpoint(struct target *target,
+		struct watchpoint **watchpoint);
+
+/**
  * Obtain the registers for GDB.
  *
  * This routine is a wrapper for target->type->get_gdb_reg_list.
  */
 int target_get_gdb_reg_list(struct target *target,
-		struct reg **reg_list[], int *reg_list_size);
+		struct reg **reg_list[], int *reg_list_size,
+		enum target_register_class reg_class);
 
 /**
  * Step the target.
@@ -446,7 +474,7 @@ int target_wait_algorithm(struct target *target,
  *
  */
 int target_run_flash_async_algorithm(struct target *target,
-		uint8_t *buffer, uint32_t count, int block_size,
+		const uint8_t *buffer, uint32_t count, int block_size,
 		int num_mem_params, struct mem_param *mem_params,
 		int num_reg_params, struct reg_param *reg_params,
 		uint32_t buffer_start, uint32_t buffer_size,
@@ -519,6 +547,22 @@ int target_blank_check_memory(struct target *target,
 		uint32_t address, uint32_t size, uint32_t *blank);
 int target_wait_state(struct target *target, enum target_state state, int ms);
 
+/**
+ * Obtain file-I/O information from target for GDB to do syscall.
+ *
+ * This routine is a wrapper for target->type->get_gdb_fileio_info.
+ */
+int target_get_gdb_fileio_info(struct target *target, struct gdb_fileio_info *fileio_info);
+
+/**
+ * Pass GDB file-I/O response to target after finishing host syscall.
+ *
+ * This routine is a wrapper for target->type->gdb_fileio_end.
+ */
+int target_gdb_fileio_end(struct target *target, int retcode, int fileio_errno, bool ctrl_c);
+
+
+
 /** Return the *name* of this targets current state */
 const char *target_state_name(struct target *target);
 
@@ -549,21 +593,27 @@ uint32_t target_get_working_area_avail(struct target *target);
 
 extern struct target *all_targets;
 
+uint64_t target_buffer_get_u64(struct target *target, const uint8_t *buffer);
 uint32_t target_buffer_get_u32(struct target *target, const uint8_t *buffer);
 uint32_t target_buffer_get_u24(struct target *target, const uint8_t *buffer);
 uint16_t target_buffer_get_u16(struct target *target, const uint8_t *buffer);
+void target_buffer_set_u64(struct target *target, uint8_t *buffer, uint64_t value);
 void target_buffer_set_u32(struct target *target, uint8_t *buffer, uint32_t value);
 void target_buffer_set_u24(struct target *target, uint8_t *buffer, uint32_t value);
 void target_buffer_set_u16(struct target *target, uint8_t *buffer, uint16_t value);
 
+void target_buffer_get_u64_array(struct target *target, const uint8_t *buffer, uint32_t count, uint64_t *dstbuf);
 void target_buffer_get_u32_array(struct target *target, const uint8_t *buffer, uint32_t count, uint32_t *dstbuf);
 void target_buffer_get_u16_array(struct target *target, const uint8_t *buffer, uint32_t count, uint16_t *dstbuf);
-void target_buffer_set_u32_array(struct target *target, uint8_t *buffer, uint32_t count, uint32_t *srcbuf);
-void target_buffer_set_u16_array(struct target *target, uint8_t *buffer, uint32_t count, uint16_t *srcbuf);
+void target_buffer_set_u64_array(struct target *target, uint8_t *buffer, uint32_t count, const uint64_t *srcbuf);
+void target_buffer_set_u32_array(struct target *target, uint8_t *buffer, uint32_t count, const uint32_t *srcbuf);
+void target_buffer_set_u16_array(struct target *target, uint8_t *buffer, uint32_t count, const uint16_t *srcbuf);
 
+int target_read_u64(struct target *target, uint64_t address, uint64_t *value);
 int target_read_u32(struct target *target, uint32_t address, uint32_t *value);
 int target_read_u16(struct target *target, uint32_t address, uint16_t *value);
 int target_read_u8(struct target *target, uint32_t address, uint8_t *value);
+int target_write_u64(struct target *target, uint64_t address, uint64_t value);
 int target_write_u32(struct target *target, uint32_t address, uint32_t value);
 int target_write_u16(struct target *target, uint32_t address, uint16_t value);
 int target_write_u8(struct target *target, uint32_t address, uint8_t value);

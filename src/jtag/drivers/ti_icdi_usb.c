@@ -33,7 +33,7 @@
 
 #include <target/cortex_m.h>
 
-#include <libusb-1.0/libusb.h>
+#include <libusb.h>
 
 #define ICDI_WRITE_ENDPOINT 0x02
 #define ICDI_READ_ENDPOINT 0x83
@@ -53,10 +53,13 @@ struct icdi_usb_handle_s {
 	char *write_buffer;
 	int max_packet;
 	int read_count;
+	uint32_t max_rw_packet; /* max X packet (read/write memory) transfers */
 };
 
-static int icdi_usb_read_mem32(void *handle, uint32_t addr, uint16_t len, uint8_t *buffer);
-static int icdi_usb_write_mem32(void *handle, uint32_t addr, uint16_t len, const uint8_t *buffer);
+static int icdi_usb_read_mem(void *handle, uint32_t addr, uint32_t size,
+		uint32_t count, uint8_t *buffer);
+static int icdi_usb_write_mem(void *handle, uint32_t addr, uint32_t size,
+		uint32_t count, const uint8_t *buffer);
 
 static int remote_escape_output(const char *buffer, int len, char *out_buf, int *out_len, int out_maxlen)
 {
@@ -118,12 +121,11 @@ static int remote_unescape_input(const char *buffer, int len, char *out_buf, int
 static int icdi_send_packet(void *handle, int len)
 {
 	unsigned char cksum = 0;
-	struct icdi_usb_handle_s *h;
+	struct icdi_usb_handle_s *h = handle;
 	int result, retry = 0;
 	int transferred = 0;
 
 	assert(handle != NULL);
-	h = (struct icdi_usb_handle_s *)handle;
 
 	/* check we have a large enough buffer for checksum "#00" */
 	if (len + 3 > h->max_packet) {
@@ -231,8 +233,7 @@ static int icdi_send_packet(void *handle, int len)
 
 static int icdi_send_cmd(void *handle, const char *cmd)
 {
-	struct icdi_usb_handle_s *h;
-	h = (struct icdi_usb_handle_s *)handle;
+	struct icdi_usb_handle_s *h = handle;
 
 	int cmd_len = snprintf(h->write_buffer, h->max_packet, PACKET_START "%s", cmd);
 	return icdi_send_packet(handle, cmd_len);
@@ -240,8 +241,7 @@ static int icdi_send_cmd(void *handle, const char *cmd)
 
 static int icdi_send_remote_cmd(void *handle, const char *data)
 {
-	struct icdi_usb_handle_s *h;
-	h = (struct icdi_usb_handle_s *)handle;
+	struct icdi_usb_handle_s *h = handle;
 
 	size_t cmd_len = sprintf(h->write_buffer, PACKET_START "qRcmd,");
 	cmd_len += hexify(h->write_buffer + cmd_len, data, 0, h->max_packet - cmd_len);
@@ -251,12 +251,11 @@ static int icdi_send_remote_cmd(void *handle, const char *data)
 
 static int icdi_get_cmd_result(void *handle)
 {
-	struct icdi_usb_handle_s *h;
+	struct icdi_usb_handle_s *h = handle;
 	int offset = 0;
 	char ch;
 
 	assert(handle != NULL);
-	h = (struct icdi_usb_handle_s *)handle;
 
 	do {
 		ch = h->read_buffer[offset++];
@@ -281,26 +280,33 @@ static int icdi_get_cmd_result(void *handle)
 
 static int icdi_usb_idcode(void *handle, uint32_t *idcode)
 {
+	*idcode = 0;
 	return ERROR_OK;
 }
 
 static int icdi_usb_write_debug_reg(void *handle, uint32_t addr, uint32_t val)
 {
-	return icdi_usb_write_mem32(handle, addr, 1, (uint8_t *)&val);
+	uint8_t buf[4];
+	/* REVISIT: There's no target pointer here so there's no way to use target_buffer_set_u32().
+	 * I guess all supported chips are little-endian anyway. */
+	h_u32_to_le(buf, val);
+	return icdi_usb_write_mem(handle, addr, 4, 1, buf);
 }
 
 static enum target_state icdi_usb_state(void *handle)
 {
 	int result;
-	struct icdi_usb_handle_s *h;
+	struct icdi_usb_handle_s *h = handle;
 	uint32_t dhcsr;
+	uint8_t buf[4];
 
-	h = (struct icdi_usb_handle_s *)handle;
-
-	result = icdi_usb_read_mem32(h, DCB_DHCSR, 1, (uint8_t *)&dhcsr);
+	result = icdi_usb_read_mem(h, DCB_DHCSR, 4, 1, buf);
 	if (result != ERROR_OK)
 		return TARGET_UNKNOWN;
 
+	/* REVISIT: There's no target pointer here so there's no way to use target_buffer_get_u32().
+	 * I guess all supported chips are little-endian anyway. */
+	dhcsr = le_to_h_u32(buf);
 	if (dhcsr & S_HALT)
 		return TARGET_HALTED;
 
@@ -309,8 +315,7 @@ static enum target_state icdi_usb_state(void *handle)
 
 static int icdi_usb_version(void *handle)
 {
-	struct icdi_usb_handle_s *h;
-	h = (struct icdi_usb_handle_s *)handle;
+	struct icdi_usb_handle_s *h = handle;
 
 	char version[20];
 
@@ -342,8 +347,7 @@ static int icdi_usb_query(void *handle)
 {
 	int result;
 
-	struct icdi_usb_handle_s *h;
-	h = (struct icdi_usb_handle_s *)handle;
+	struct icdi_usb_handle_s *h = handle;
 
 	result = icdi_send_cmd(handle, "qSupported");
 	if (result != ERROR_OK)
@@ -364,12 +368,12 @@ static int icdi_usb_query(void *handle)
 		char *separator;
 		int max_packet;
 
-		max_packet = strtoul(offset + 11, &separator, 16);
+		max_packet = strtol(offset + 11, &separator, 16);
 		if (!max_packet)
 			LOG_ERROR("invalid max packet, using defaults");
 		else
 			h->max_packet = max_packet;
-		LOG_DEBUG("max packet supported : %" PRIu32 " bytes", h->max_packet);
+		LOG_DEBUG("max packet supported : %i bytes", h->max_packet);
 	}
 
 
@@ -476,10 +480,8 @@ static int icdi_usb_read_regs(void *handle)
 static int icdi_usb_read_reg(void *handle, int num, uint32_t *val)
 {
 	int result;
-	struct icdi_usb_handle_s *h;
+	struct icdi_usb_handle_s *h = handle;
 	char cmd[10];
-
-	h = (struct icdi_usb_handle_s *)handle;
 
 	snprintf(cmd, sizeof(cmd), "p%x", num);
 	result = icdi_send_cmd(handle, cmd);
@@ -494,10 +496,12 @@ static int icdi_usb_read_reg(void *handle, int num, uint32_t *val)
 	}
 
 	/* convert result */
-	if (unhexify((char *)val, h->read_buffer + 2, 4) != 4) {
+	uint8_t buf[4];
+	if (unhexify((char *)buf, h->read_buffer + 2, 4) != 4) {
 		LOG_ERROR("failed to convert result");
 		return ERROR_FAIL;
 	}
+	*val = le_to_h_u32(buf);
 
 	return result;
 }
@@ -506,9 +510,11 @@ static int icdi_usb_write_reg(void *handle, int num, uint32_t val)
 {
 	int result;
 	char cmd[20];
+	uint8_t buf[4];
+	h_u32_to_le(buf, val);
 
 	int cmd_len = snprintf(cmd, sizeof(cmd), "P%x=", num);
-	hexify(cmd + cmd_len, (char *)&val, 4, sizeof(cmd));
+	hexify(cmd + cmd_len, (const char *)buf, 4, sizeof(cmd));
 
 	result = icdi_send_cmd(handle, cmd);
 	if (result != ERROR_OK)
@@ -524,15 +530,13 @@ static int icdi_usb_write_reg(void *handle, int num, uint32_t val)
 	return result;
 }
 
-static int icdi_usb_read_mem(void *handle, uint32_t addr, uint32_t len, uint8_t *buffer)
+static int icdi_usb_read_mem_int(void *handle, uint32_t addr, uint32_t len, uint8_t *buffer)
 {
 	int result;
-	struct icdi_usb_handle_s *h;
+	struct icdi_usb_handle_s *h = handle;
 	char cmd[20];
 
-	h = (struct icdi_usb_handle_s *)handle;
-
-	snprintf(cmd, sizeof(cmd), "x%x,%x", addr, len);
+	snprintf(cmd, sizeof(cmd), "x%" PRIx32 ",%" PRIx32, addr, len);
 	result = icdi_send_cmd(handle, cmd);
 	if (result != ERROR_OK)
 		return result;
@@ -547,29 +551,27 @@ static int icdi_usb_read_mem(void *handle, uint32_t addr, uint32_t len, uint8_t 
 	/* unescape input */
 	int read_len = remote_unescape_input(h->read_buffer + 5, h->read_count - 8, (char *)buffer, len);
 	if (read_len != (int)len) {
-		LOG_ERROR("read more bytes than expected: actual 0x%" PRIx32 " expected 0x%" PRIx32, read_len, len);
+		LOG_ERROR("read more bytes than expected: actual 0x%x expected 0x%" PRIx32, read_len, len);
 		return ERROR_FAIL;
 	}
 
 	return ERROR_OK;
 }
 
-static int icdi_usb_write_mem(void *handle, uint32_t addr, uint32_t len, const uint8_t *buffer)
+static int icdi_usb_write_mem_int(void *handle, uint32_t addr, uint32_t len, const uint8_t *buffer)
 {
 	int result;
-	struct icdi_usb_handle_s *h;
+	struct icdi_usb_handle_s *h = handle;
 
-	h = (struct icdi_usb_handle_s *)handle;
-
-	size_t cmd_len = snprintf(h->write_buffer, h->max_packet, PACKET_START "X%x,%x:", addr, len);
+	size_t cmd_len = snprintf(h->write_buffer, h->max_packet, PACKET_START "X%" PRIx32 ",%" PRIx32 ":", addr, len);
 
 	int out_len;
-	cmd_len += remote_escape_output((char *)buffer, len, h->write_buffer + cmd_len,
+	cmd_len += remote_escape_output((const char *)buffer, len, h->write_buffer + cmd_len,
 			&out_len, h->max_packet - cmd_len);
 
 	if (out_len < (int)len) {
 		/* for now issue a error as we have no way of allocating a larger buffer */
-		LOG_ERROR("memory buffer too small: requires 0x%" PRIx32 " actual 0x%" PRIx32, out_len, len);
+		LOG_ERROR("memory buffer too small: requires 0x%x actual 0x%" PRIx32, out_len, len);
 		return ERROR_FAIL;
 	}
 
@@ -587,31 +589,65 @@ static int icdi_usb_write_mem(void *handle, uint32_t addr, uint32_t len, const u
 	return ERROR_OK;
 }
 
-static int icdi_usb_read_mem8(void *handle, uint32_t addr, uint16_t len, uint8_t *buffer)
+static int icdi_usb_read_mem(void *handle, uint32_t addr, uint32_t size,
+		uint32_t count, uint8_t *buffer)
 {
-	return icdi_usb_read_mem(handle, addr, len, buffer);
+	int retval = ERROR_OK;
+	struct icdi_usb_handle_s *h = handle;
+	uint32_t bytes_remaining;
+
+	/* calculate byte count */
+	count *= size;
+
+	while (count) {
+
+		bytes_remaining = h->max_rw_packet;
+		if (count < bytes_remaining)
+			bytes_remaining = count;
+
+		retval = icdi_usb_read_mem_int(handle, addr, bytes_remaining, buffer);
+		if (retval != ERROR_OK)
+			return retval;
+
+		buffer += bytes_remaining;
+		addr += bytes_remaining;
+		count -= bytes_remaining;
+	}
+
+	return retval;
 }
 
-static int icdi_usb_write_mem8(void *handle, uint32_t addr, uint16_t len, const uint8_t *buffer)
+static int icdi_usb_write_mem(void *handle, uint32_t addr, uint32_t size,
+		uint32_t count, const uint8_t *buffer)
 {
-	return icdi_usb_write_mem(handle, addr, len, buffer);
-}
+	int retval = ERROR_OK;
+	struct icdi_usb_handle_s *h = handle;
+	uint32_t bytes_remaining;
 
-static int icdi_usb_read_mem32(void *handle, uint32_t addr, uint16_t len, uint8_t *buffer)
-{
-	return icdi_usb_read_mem(handle, addr, len * 4, buffer);
-}
+	/* calculate byte count */
+	count *= size;
 
-static int icdi_usb_write_mem32(void *handle, uint32_t addr, uint16_t len, const uint8_t *buffer)
-{
-	return icdi_usb_write_mem(handle, addr, len * 4, buffer);
+	while (count) {
+
+		bytes_remaining = h->max_rw_packet;
+		if (count < bytes_remaining)
+			bytes_remaining = count;
+
+		retval = icdi_usb_write_mem_int(handle, addr, bytes_remaining, buffer);
+		if (retval != ERROR_OK)
+			return retval;
+
+		buffer += bytes_remaining;
+		addr += bytes_remaining;
+		count -= bytes_remaining;
+	}
+
+	return retval;
 }
 
 static int icdi_usb_close(void *handle)
 {
-	struct icdi_usb_handle_s *h;
-
-	h = (struct icdi_usb_handle_s *)handle;
+	struct icdi_usb_handle_s *h = handle;
 
 	if (h->usb_dev)
 		libusb_close(h->usb_dev);
@@ -709,7 +745,7 @@ static int icdi_usb_open(struct hl_interface_param_s *param, void **fd)
 	 * as we are using gdb binary packets to transfer memory we have to
 	 * reserve half the buffer for any possible escape chars plus
 	 * at least 64 bytes for the gdb packet header */
-	param->max_buffer = (((h->max_packet - 64) / 4) * 4) / 2;
+	h->max_rw_packet = (((h->max_packet - 64) / 4) * 4) / 2;
 
 	return ERROR_OK;
 
@@ -732,9 +768,7 @@ struct hl_layout_api_s icdi_usb_layout_api = {
 	.read_regs = icdi_usb_read_regs,
 	.read_reg = icdi_usb_read_reg,
 	.write_reg = icdi_usb_write_reg,
-	.read_mem8 = icdi_usb_read_mem8,
-	.write_mem8 = icdi_usb_write_mem8,
-	.read_mem32 = icdi_usb_read_mem32,
-	.write_mem32 = icdi_usb_write_mem32,
+	.read_mem = icdi_usb_read_mem,
+	.write_mem = icdi_usb_write_mem,
 	.write_debug_reg = icdi_usb_write_debug_reg
 };

@@ -12,7 +12,7 @@ SUBDIRS = \
 	server \
 	rtos
 
-lib_LTLIBRARIES = libopenocd.la
+noinst_LTLIBRARIES = libopenocd.la
 bin_PROGRAMS = openocd
 
 MAINFILE = main.c
@@ -63,25 +63,6 @@ else
 MINGWLDADD =
 endif
 
-if FT2232_LIBFTDI
-FTDI2232LIB = -lftdi -lusb
-else
-if PRESTO_LIBFTDI
-FTDI2232LIB = -lftdi -lusb
-else
-FTDI2232LIB =
-endif
-endif
-
-LIBUSB =
-if USE_LIBUSB1
-LIBUSB += -lusb-1.0
-endif
-
-if USE_LIBUSB0
-LIBUSB += -lusb
-endif
-
 libopenocd_la_LIBADD = \
 	$(top_builddir)/src/xsvf/libxsvf.la \
 	$(top_builddir)/src/svf/libsvf.la \
@@ -93,7 +74,8 @@ libopenocd_la_LIBADD = \
 	$(top_builddir)/src/server/libserver.la \
 	$(top_builddir)/src/rtos/librtos.la \
 	$(top_builddir)/src/helper/libhelper.la \
-	$(FTDI2232LIB) $(MINGWLDADD) $(LIBUSB)
+	$(LIBFTDI_LIBS) $(MINGWLDADD) \
+	$(HIDAPI_LIBS) $(LIBUSB1_LIBS) $(LIBUSB0_LIBS)
 
 STARTUP_TCL_SRCS = \
 	$(srcdir)/helper/startup.tcl \
@@ -121,7 +103,7 @@ CLEANFILES = startup.tcl startup_tcl.c
 # we do not want generated file in the dist
 dist-hook:
 	rm -f $(distdir)/startup_tcl.c
-	
+
 MAINTAINERCLEANFILES = $(srcdir)/Makefile.in
 
 # The "quick" target builds executables & reinstalls the executables

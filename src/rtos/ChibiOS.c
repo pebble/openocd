@@ -296,21 +296,8 @@ static int ChibiOS_update_threads(struct rtos *rtos)
 	}
 
 	/* wipe out previous thread details if any */
-	int j;
-	if (rtos->thread_details) {
-		for (j = 0; j < rtos->thread_count; j++) {
-			struct thread_detail *current_thread = &rtos->thread_details[j];
-			if (current_thread->display_str != NULL)
-				free(current_thread->display_str);
-			if (current_thread->thread_name_str != NULL)
-				free(current_thread->thread_name_str);
-			if (current_thread->extra_info_str != NULL)
-				free(current_thread->extra_info_str);
-		}
-		free(rtos->thread_details);
-		rtos->thread_details = NULL;
-		rtos->thread_count = 0;
-	}
+	rtos_free_threadlist(rtos);
+
 	/* ChibiOS does not save the current thread count. We have to first
 	 * parse the double linked thread list to check for errors and the number of
 	 * threads. */
@@ -360,17 +347,17 @@ static int ChibiOS_update_threads(struct rtos *rtos)
 		const char tmp_thread_name[] = "Current Execution";
 		const char tmp_thread_extra_info[] = "No RTOS thread";
 
-		rtos->thread_details = (struct thread_detail *) malloc(
+		rtos->thread_details = malloc(
 				sizeof(struct thread_detail));
 		rtos->thread_details->threadid = 1;
 		rtos->thread_details->exists = true;
 		rtos->thread_details->display_str = NULL;
 
-		rtos->thread_details->extra_info_str = (char *) malloc(
+		rtos->thread_details->extra_info_str = malloc(
 				sizeof(tmp_thread_extra_info));
 		strcpy(rtos->thread_details->extra_info_str, tmp_thread_extra_info);
 
-		rtos->thread_details->thread_name_str = (char *) malloc(
+		rtos->thread_details->thread_name_str = malloc(
 				sizeof(tmp_thread_name));
 		strcpy(rtos->thread_details->thread_name_str, tmp_thread_name);
 
@@ -380,7 +367,7 @@ static int ChibiOS_update_threads(struct rtos *rtos)
 	}
 
 	/* create space for new thread details */
-	rtos->thread_details = (struct thread_detail *) malloc(
+	rtos->thread_details = malloc(
 			sizeof(struct thread_detail) * tasks_found);
 	if (!rtos->thread_details) {
 		LOG_ERROR("Could not allocate space for thread details");
@@ -429,7 +416,7 @@ static int ChibiOS_update_threads(struct rtos *rtos)
 		if (tmp_str[0] == '\x00')
 			strcpy(tmp_str, "No Name");
 
-		curr_thrd_details->thread_name_str = (char *)malloc(
+		curr_thrd_details->thread_name_str = malloc(
 				strlen(tmp_str) + 1);
 		strcpy(curr_thrd_details->thread_name_str, tmp_str);
 
@@ -450,7 +437,7 @@ static int ChibiOS_update_threads(struct rtos *rtos)
 		else
 			state_desc = "Unknown state";
 
-		curr_thrd_details->extra_info_str = (char *)malloc(strlen(
+		curr_thrd_details->extra_info_str = malloc(strlen(
 					state_desc)+1);
 		strcpy(curr_thrd_details->extra_info_str, state_desc);
 
@@ -511,7 +498,7 @@ static int ChibiOS_get_thread_reg_list(struct rtos *rtos, int64_t thread_id, cha
 static int ChibiOS_get_symbol_list_to_lookup(symbol_table_elem_t *symbol_list[])
 {
 	unsigned int i;
-	*symbol_list = (symbol_table_elem_t *) malloc(
+	*symbol_list = malloc(
 			sizeof(symbol_table_elem_t) * ARRAY_SIZE(ChibiOS_symbol_list));
 
 	for (i = 0; i < ARRAY_SIZE(ChibiOS_symbol_list); i++)
@@ -552,6 +539,6 @@ static int ChibiOS_create(struct target *target)
 		return -1;
 	}
 
-	target->rtos->rtos_specific_params = (void *) &ChibiOS_params_list[i];
+	target->rtos->rtos_specific_params = &ChibiOS_params_list[i];
 	return 0;
 }

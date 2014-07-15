@@ -1125,7 +1125,7 @@ static int dsp5680xx_read_16_single(struct target *t, uint32_t a,
 	/* at this point the data i want is at the reg eonce can read */
 	retval = core_rx_lower_data(target, data_read);
 	err_check_propagate(retval);
-	LOG_DEBUG("%s:Data read from 0x%06X: 0x%02X%02X", __func__, address,
+	LOG_DEBUG("%s:Data read from 0x%06" PRIX32 ": 0x%02X%02X", __func__, address,
 		  data_read[1], data_read[0]);
 	return retval;
 }
@@ -1170,8 +1170,8 @@ static int dsp5680xx_read_32_single(struct target *t, uint32_t a,
 	return retval;
 }
 
-static int dsp5680xx_read(struct target *t, uint32_t a, unsigned size,
-			  unsigned count, uint8_t *buf)
+static int dsp5680xx_read(struct target *t, uint32_t a, uint32_t size,
+			  uint32_t count, uint8_t *buf)
 {
 	struct target *target = t;
 
@@ -1307,7 +1307,7 @@ static int dsp5680xx_write_8(struct target *t, uint32_t a, uint32_t c,
 			dsp5680xx_write_16_single(target, address + iter, data_16,
 						  pmem);
 		if (retval != ERROR_OK) {
-			LOG_ERROR("%s: Could not write to p:0x%04X", __func__,
+			LOG_ERROR("%s: Could not write to p:0x%04" PRIX32, __func__,
 				  address);
 			dsp5680xx_context.flush = 1;
 			return retval;
@@ -1364,7 +1364,7 @@ static int dsp5680xx_write_16(struct target *t, uint32_t a, uint32_t c,
 			dsp5680xx_write_16_single(target, address + iter,
 						  data[iter], pmem);
 		if (retval != ERROR_OK) {
-			LOG_ERROR("%s: Could not write to p:0x%04X", __func__,
+			LOG_ERROR("%s: Could not write to p:0x%04" PRIX32, __func__,
 				  address);
 			dsp5680xx_context.flush = 1;
 			return retval;
@@ -1401,7 +1401,7 @@ static int dsp5680xx_write_32(struct target *t, uint32_t a, uint32_t c,
 			dsp5680xx_write_32_single(target, address + (iter << 1),
 						  data[iter], pmem);
 		if (retval != ERROR_OK) {
-			LOG_ERROR("%s: Could not write to p:0x%04X", __func__,
+			LOG_ERROR("%s: Could not write to p:0x%04" PRIX32, __func__,
 				  address);
 			dsp5680xx_context.flush = 1;
 			return retval;
@@ -1524,7 +1524,7 @@ static int dsp5680xx_checksum_memory(struct target *t, uint32_t a, uint32_t s,
  *
  * @return
  */
-static int perl_crc(uint8_t *buff8, uint32_t word_count)
+static int perl_crc(const uint8_t *buff8, uint32_t word_count)
 {
 	uint16_t checksum = 0xffff;
 
@@ -1983,14 +1983,14 @@ const uint16_t pgm_write_pflash[] = { 0x8A46, 0x0013, 0x807D, 0xE700,
 
 const uint32_t pgm_write_pflash_length = 31;
 
-int dsp5680xx_f_wr(struct target *t, uint8_t *b, uint32_t a, uint32_t count,
+int dsp5680xx_f_wr(struct target *t, const uint8_t *b, uint32_t a, uint32_t count,
 		   int is_flash_lock)
 {
 	struct target *target = t;
 
 	uint32_t address = a;
 
-	uint8_t *buffer = b;
+	const uint8_t *buffer = b;
 
 	int retval = ERROR_OK;
 
@@ -2277,8 +2277,6 @@ struct target_type dsp5680xx_target = {
 
 	.poll = dsp5680xx_poll,
 	.arch_state = dsp5680xx_arch_state,
-
-	.target_request_data = NULL,
 
 	.halt = dsp5680xx_halt,
 	.resume = dsp5680xx_resume,

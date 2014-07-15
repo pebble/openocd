@@ -51,30 +51,36 @@ static int mips_m4k_bulk_write_memory(struct target *target, uint32_t address,
 
 static int mips_m4k_examine_debug_reason(struct target *target)
 {
+	struct mips32_common *mips32 = target_to_mips32(target);
+	struct mips_ejtag *ejtag_info = &mips32->ejtag_info;
 	uint32_t break_status;
 	int retval;
 
 	if ((target->debug_reason != DBG_REASON_DBGRQ)
 		&& (target->debug_reason != DBG_REASON_SINGLESTEP)) {
 		/* get info about inst breakpoint support */
-		retval = target_read_u32(target, EJTAG_IBS, &break_status);
+		retval = target_read_u32(target,
+			ejtag_info->ejtag_ibs_addr, &break_status);
 		if (retval != ERROR_OK)
 			return retval;
 		if (break_status & 0x1f) {
 			/* we have halted on a  breakpoint */
-			retval = target_write_u32(target, EJTAG_IBS, 0);
+			retval = target_write_u32(target,
+				ejtag_info->ejtag_ibs_addr, 0);
 			if (retval != ERROR_OK)
 				return retval;
 			target->debug_reason = DBG_REASON_BREAKPOINT;
 		}
 
 		/* get info about data breakpoint support */
-		retval = target_read_u32(target, EJTAG_DBS, &break_status);
+		retval = target_read_u32(target,
+			ejtag_info->ejtag_dbs_addr, &break_status);
 		if (retval != ERROR_OK)
 			return retval;
 		if (break_status & 0x1f) {
 			/* we have halted on a  breakpoint */
-			retval = target_write_u32(target, EJTAG_DBS, 0);
+			retval = target_write_u32(target,
+				ejtag_info->ejtag_dbs_addr, 0);
 			if (retval != ERROR_OK)
 				return retval;
 			target->debug_reason = DBG_REASON_WATCHPOINT;
@@ -141,7 +147,7 @@ static int mips_m4k_halt_smp(struct target *target)
 			ret = mips_m4k_halt(curr);
 
 		if (ret != ERROR_OK) {
-			LOG_ERROR("halt failed target->coreid: %d", curr->coreid);
+			LOG_ERROR("halt failed target->coreid: %" PRId32, curr->coreid);
 			retval = ret;
 		}
 		head = head->next;
@@ -364,12 +370,6 @@ static int mips_m4k_deassert_reset(struct target *target)
 	return ERROR_OK;
 }
 
-static int mips_m4k_soft_reset_halt(struct target *target)
-{
-	/* TODO */
-	return ERROR_OK;
-}
-
 static int mips_m4k_single_step_core(struct target *target)
 {
 	struct mips32_common *mips32 = target_to_mips32(target);
@@ -405,7 +405,7 @@ static int mips_m4k_restore_smp(struct target *target, uint32_t address, int han
 						   handle_breakpoints, 0);
 
 			if (ret != ERROR_OK) {
-				LOG_ERROR("target->coreid :%d failed to resume at address :0x%x",
+				LOG_ERROR("target->coreid :%" PRId32 " failed to resume at address :0x%" PRIx32,
 						  curr->coreid, address);
 				retval = ret;
 			}
@@ -587,6 +587,7 @@ static int mips_m4k_set_breakpoint(struct target *target,
 		struct breakpoint *breakpoint)
 {
 	struct mips32_common *mips32 = target_to_mips32(target);
+	struct mips_ejtag *ejtag_info = &mips32->ejtag_info;
 	struct mips32_comparator *comparator_list = mips32->inst_break_list;
 	int retval;
 
@@ -601,22 +602,31 @@ static int mips_m4k_set_breakpoint(struct target *target,
 		while (comparator_list[bp_num].used && (bp_num < mips32->num_inst_bpoints))
 			bp_num++;
 		if (bp_num >= mips32->num_inst_bpoints) {
-			LOG_ERROR("Can not find free FP Comparator(bpid: %d)",
+			LOG_ERROR("Can not find free FP Comparator(bpid: %" PRIu32 ")",
 					breakpoint->unique_id);
 			return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 		}
 		breakpoint->set = bp_num + 1;
 		comparator_list[bp_num].used = 1;
 		comparator_list[bp_num].bp_value = breakpoint->address;
+
+		/* EJTAG 2.0 uses 30bit IBA. First 2 bits are reserved.
+		 * Warning: there is no IB ASID registers in 2.0.
+		 * Do not set it! :) */
+		if (ejtag_info->ejtag_version == EJTAG_VERSION_20)
+			comparator_list[bp_num].bp_value &= 0xFFFFFFFC;
+
 		target_write_u32(target, comparator_list[bp_num].reg_address,
 				comparator_list[bp_num].bp_value);
-		target_write_u32(target, comparator_list[bp_num].reg_address + 0x08, 0x00000000);
-		target_write_u32(target, comparator_list[bp_num].reg_address + 0x18, 1);
-		LOG_DEBUG("bpid: %d, bp_num %i bp_value 0x%" PRIx32 "",
+		target_write_u32(target, comparator_list[bp_num].reg_address +
+				 ejtag_info->ejtag_ibm_offs, 0x00000000);
+		target_write_u32(target, comparator_list[bp_num].reg_address +
+				 ejtag_info->ejtag_ibc_offs, 1);
+		LOG_DEBUG("bpid: %" PRIu32 ", bp_num %i bp_value 0x%" PRIx32 "",
 				  breakpoint->unique_id,
 				  bp_num, comparator_list[bp_num].bp_value);
 	} else if (breakpoint->type == BKPT_SOFT) {
-		LOG_DEBUG("bpid: %d", breakpoint->unique_id);
+		LOG_DEBUG("bpid: %" PRIu32, breakpoint->unique_id);
 		if (breakpoint->length == 4) {
 			uint32_t verify = 0xffffffff;
 
@@ -668,6 +678,7 @@ static int mips_m4k_unset_breakpoint(struct target *target,
 {
 	/* get pointers to arch-specific information */
 	struct mips32_common *mips32 = target_to_mips32(target);
+	struct mips_ejtag *ejtag_info = &mips32->ejtag_info;
 	struct mips32_comparator *comparator_list = mips32->inst_break_list;
 	int retval;
 
@@ -679,20 +690,21 @@ static int mips_m4k_unset_breakpoint(struct target *target,
 	if (breakpoint->type == BKPT_HARD) {
 		int bp_num = breakpoint->set - 1;
 		if ((bp_num < 0) || (bp_num >= mips32->num_inst_bpoints)) {
-			LOG_DEBUG("Invalid FP Comparator number in breakpoint (bpid: %d)",
+			LOG_DEBUG("Invalid FP Comparator number in breakpoint (bpid: %" PRIu32 ")",
 					  breakpoint->unique_id);
 			return ERROR_OK;
 		}
-		LOG_DEBUG("bpid: %d - releasing hw: %d",
+		LOG_DEBUG("bpid: %" PRIu32 " - releasing hw: %d",
 				breakpoint->unique_id,
 				bp_num);
 		comparator_list[bp_num].used = 0;
 		comparator_list[bp_num].bp_value = 0;
-		target_write_u32(target, comparator_list[bp_num].reg_address + 0x18, 0);
+		target_write_u32(target, comparator_list[bp_num].reg_address +
+				 ejtag_info->ejtag_ibc_offs, 0);
 
 	} else {
 		/* restore original instruction (kept in target endianness) */
-		LOG_DEBUG("bpid: %d", breakpoint->unique_id);
+		LOG_DEBUG("bpid: %" PRIu32, breakpoint->unique_id);
 		if (breakpoint->length == 4) {
 			uint32_t current_instr;
 
@@ -777,6 +789,7 @@ static int mips_m4k_set_watchpoint(struct target *target,
 		struct watchpoint *watchpoint)
 {
 	struct mips32_common *mips32 = target_to_mips32(target);
+	struct mips_ejtag *ejtag_info = &mips32->ejtag_info;
 	struct mips32_comparator *comparator_list = mips32->data_break_list;
 	int wp_num = 0;
 	/*
@@ -826,11 +839,25 @@ static int mips_m4k_set_watchpoint(struct target *target,
 	watchpoint->set = wp_num + 1;
 	comparator_list[wp_num].used = 1;
 	comparator_list[wp_num].bp_value = watchpoint->address;
-	target_write_u32(target, comparator_list[wp_num].reg_address, comparator_list[wp_num].bp_value);
-	target_write_u32(target, comparator_list[wp_num].reg_address + 0x08, 0x00000000);
-	target_write_u32(target, comparator_list[wp_num].reg_address + 0x10, 0x00000000);
-	target_write_u32(target, comparator_list[wp_num].reg_address + 0x18, enable);
-	target_write_u32(target, comparator_list[wp_num].reg_address + 0x20, 0);
+
+	/* EJTAG 2.0 uses 29bit DBA. First 3 bits are reserved.
+	 * There is as well no ASID register support. */
+	if (ejtag_info->ejtag_version == EJTAG_VERSION_20)
+		comparator_list[wp_num].bp_value &= 0xFFFFFFF8;
+	else
+		target_write_u32(target, comparator_list[wp_num].reg_address +
+			 ejtag_info->ejtag_dbasid_offs, 0x00000000);
+
+	target_write_u32(target, comparator_list[wp_num].reg_address,
+			 comparator_list[wp_num].bp_value);
+	target_write_u32(target, comparator_list[wp_num].reg_address +
+			 ejtag_info->ejtag_dbm_offs, 0x00000000);
+
+	target_write_u32(target, comparator_list[wp_num].reg_address +
+			 ejtag_info->ejtag_dbc_offs, enable);
+	/* TODO: probably this value is ignored on 2.0 */
+	target_write_u32(target, comparator_list[wp_num].reg_address +
+			 ejtag_info->ejtag_dbv_offs, 0);
 	LOG_DEBUG("wp_num %i bp_value 0x%" PRIx32 "", wp_num, comparator_list[wp_num].bp_value);
 
 	return ERROR_OK;
@@ -841,6 +868,7 @@ static int mips_m4k_unset_watchpoint(struct target *target,
 {
 	/* get pointers to arch-specific information */
 	struct mips32_common *mips32 = target_to_mips32(target);
+	struct mips_ejtag *ejtag_info = &mips32->ejtag_info;
 	struct mips32_comparator *comparator_list = mips32->data_break_list;
 
 	if (!watchpoint->set) {
@@ -855,7 +883,8 @@ static int mips_m4k_unset_watchpoint(struct target *target,
 	}
 	comparator_list[wp_num].used = 0;
 	comparator_list[wp_num].bp_value = 0;
-	target_write_u32(target, comparator_list[wp_num].reg_address + 0x18, 0);
+	target_write_u32(target, comparator_list[wp_num].reg_address +
+			 ejtag_info->ejtag_dbc_offs, 0);
 	watchpoint->set = 0;
 
 	return ERROR_OK;
@@ -1019,9 +1048,9 @@ static int mips_m4k_write_memory(struct target *target, uint32_t address,
 	/* if noDMA off, use DMAACC mode for memory write */
 	int retval;
 	if (ejtag_info->impcode & EJTAG_IMP_NODMA)
-		retval = mips32_pracc_write_mem(ejtag_info, address, size, count, (void *)buffer);
+		retval = mips32_pracc_write_mem(ejtag_info, address, size, count, buffer);
 	else
-		retval = mips32_dmaacc_write_mem(ejtag_info, address, size, count, (void *)buffer);
+		retval = mips32_dmaacc_write_mem(ejtag_info, address, size, count, buffer);
 
 	if (t != NULL)
 		free(t);
@@ -1102,6 +1131,7 @@ static int mips_m4k_bulk_write_memory(struct target *target, uint32_t address,
 {
 	struct mips32_common *mips32 = target_to_mips32(target);
 	struct mips_ejtag *ejtag_info = &mips32->ejtag_info;
+	struct working_area *fast_data_area;
 	int retval;
 	int write_t = 1;
 
@@ -1126,6 +1156,17 @@ static int mips_m4k_bulk_write_memory(struct target *target, uint32_t address,
 
 		/* reset fastadata state so the algo get reloaded */
 		ejtag_info->fast_access_save = -1;
+	}
+
+	fast_data_area = mips32->fast_data_area;
+
+	if (address <= fast_data_area->address + fast_data_area->size &&
+			fast_data_area->address <= address + count) {
+		LOG_ERROR("fast_data (0x%8.8" PRIx32 ") is within write area "
+			  "(0x%8.8" PRIx32 "-0x%8.8" PRIx32 ").",
+			  fast_data_area->address, address, address + count);
+		LOG_ERROR("Change work-area-phys or load_image address!");
+		return ERROR_FAIL;
 	}
 
 	/* mips32_pracc_fastdata_xfer requires uint32_t in host endianness, */
@@ -1267,7 +1308,7 @@ COMMAND_HANDLER(mips_m4k_handle_smp_gdb_command)
 			target->gdb_service->core[1] = coreid;
 
 		}
-		command_print(CMD_CTX, "gdb coreid  %d -> %d", target->gdb_service->core[0]
+		command_print(CMD_CTX, "gdb coreid  %" PRId32 " -> %" PRId32, target->gdb_service->core[0]
 			, target->gdb_service->core[1]);
 	}
 	return ERROR_OK;
@@ -1280,7 +1321,7 @@ COMMAND_HANDLER(mips_m4k_handle_scan_delay_command)
 	struct mips_ejtag *ejtag_info = &mips_m4k->mips32.ejtag_info;
 
 	if (CMD_ARGC == 1)
-		COMMAND_PARSE_NUMBER(u32, CMD_ARGV[0], ejtag_info->scan_delay);
+		COMMAND_PARSE_NUMBER(uint, CMD_ARGV[0], ejtag_info->scan_delay);
 	else if (CMD_ARGC > 1)
 			return ERROR_COMMAND_SYNTAX_ERROR;
 
@@ -1355,15 +1396,12 @@ struct target_type mips_m4k_target = {
 	.poll = mips_m4k_poll,
 	.arch_state = mips32_arch_state,
 
-	.target_request_data = NULL,
-
 	.halt = mips_m4k_halt,
 	.resume = mips_m4k_resume,
 	.step = mips_m4k_step,
 
 	.assert_reset = mips_m4k_assert_reset,
 	.deassert_reset = mips_m4k_deassert_reset,
-	.soft_reset_halt = mips_m4k_soft_reset_halt,
 
 	.get_gdb_reg_list = mips32_get_gdb_reg_list,
 

@@ -86,29 +86,31 @@ static int nds32_get_core_reg(struct reg *reg)
 	}
 
 	if (reg->valid) {
-		LOG_DEBUG("reading register(cached) %i(%s), value: 0x%8.8" PRIx32,
+		LOG_DEBUG("reading register(cached) %" PRIi32 "(%s), value: 0x%8.8" PRIx32,
 				reg_arch_info->num, reg->name, reg_arch_info->value);
 		return ERROR_OK;
 	}
+
+	int mapped_regnum = nds32->register_map(nds32, reg_arch_info->num);
 
 	if (reg_arch_info->enable == false) {
 		reg_arch_info->value = NDS32_REGISTER_DISABLE;
 		retval = ERROR_FAIL;
 	} else {
 		if ((nds32->fpu_enable == false) &&
-			(NDS32_REG_TYPE_FPU == nds32_reg_type(reg_arch_info->num))) {
+			(NDS32_REG_TYPE_FPU == nds32_reg_type(mapped_regnum))) {
 			reg_arch_info->value = 0;
 			retval = ERROR_OK;
 		} else if ((nds32->audio_enable == false) &&
-			(NDS32_REG_TYPE_AUMR == nds32_reg_type(reg_arch_info->num))) {
+			(NDS32_REG_TYPE_AUMR == nds32_reg_type(mapped_regnum))) {
 			reg_arch_info->value = 0;
 			retval = ERROR_OK;
 		} else {
 			retval = aice_read_register(aice,
-					reg_arch_info->num, &(reg_arch_info->value));
+					mapped_regnum, &(reg_arch_info->value));
 		}
 
-		LOG_DEBUG("reading register %i(%s), value: 0x%8.8" PRIx32,
+		LOG_DEBUG("reading register %" PRIi32 "(%s), value: 0x%8.8" PRIx32,
 				reg_arch_info->num, reg->name, reg_arch_info->value);
 	}
 
@@ -301,44 +303,46 @@ static int nds32_set_core_reg(struct reg *reg, uint8_t *buf)
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
+	int mapped_regnum = nds32->register_map(nds32, reg_arch_info->num);
+
 	/* ignore values that will generate exception */
-	if (nds32_reg_exception(reg_arch_info->num, value))
+	if (nds32_reg_exception(mapped_regnum, value))
 		return ERROR_OK;
 
-	LOG_DEBUG("writing register %i(%s) with value 0x%8.8" PRIx32,
+	LOG_DEBUG("writing register %" PRIi32 "(%s) with value 0x%8.8" PRIx32,
 			reg_arch_info->num, reg->name, value);
 
 	if ((nds32->fpu_enable == false) &&
-		(NDS32_REG_TYPE_FPU == nds32_reg_type(reg_arch_info->num))) {
+		(NDS32_REG_TYPE_FPU == nds32_reg_type(mapped_regnum))) {
 
 		buf_set_u32(reg->value, 0, 32, 0);
 	} else if ((nds32->audio_enable == false) &&
-		(NDS32_REG_TYPE_AUMR == nds32_reg_type(reg_arch_info->num))) {
+		(NDS32_REG_TYPE_AUMR == nds32_reg_type(mapped_regnum))) {
 
 		buf_set_u32(reg->value, 0, 32, 0);
 	} else {
 		buf_set_u32(reg->value, 0, 32, value);
-		aice_write_register(aice, reg_arch_info->num, reg_arch_info->value);
+		aice_write_register(aice, mapped_regnum, reg_arch_info->value);
 
 		/* After set value to registers, read the value from target
 		 * to avoid W1C inconsistency. */
-		aice_read_register(aice, reg_arch_info->num, &(reg_arch_info->value));
+		aice_read_register(aice, mapped_regnum, &(reg_arch_info->value));
 	}
 
 	reg->valid = true;
 	reg->dirty = false;
 
 	/* update registers to take effect right now */
-	if (IR0 == reg_arch_info->num) {
+	if (IR0 == mapped_regnum) {
 		nds32_update_psw(nds32);
-	} else if (MR0 == reg_arch_info->num) {
+	} else if (MR0 == mapped_regnum) {
 		nds32_update_mmu_info(nds32);
-	} else if ((MR6 == reg_arch_info->num) || (MR7 == reg_arch_info->num)) {
+	} else if ((MR6 == mapped_regnum) || (MR7 == mapped_regnum)) {
 		/* update lm information */
 		nds32_update_lm_info(nds32);
-	} else if (MR8 == reg_arch_info->num) {
+	} else if (MR8 == mapped_regnum) {
 		nds32_update_cache_info(nds32);
-	} else if (FUCPR == reg_arch_info->num) {
+	} else if (FUCPR == mapped_regnum) {
 		/* update audio/fpu setting */
 		nds32_check_extension(nds32);
 	}
@@ -391,7 +395,7 @@ static const struct reg_arch_type nds32_reg_access_type_64 = {
 static struct reg_cache *nds32_build_reg_cache(struct target *target,
 		struct nds32 *nds32)
 {
-	struct reg_cache *cache = malloc(sizeof(struct reg_cache));
+	struct reg_cache *cache = calloc(sizeof(struct reg_cache), 1);
 	struct reg *reg_list = calloc(TOTAL_REG_NUM, sizeof(struct reg));
 	struct nds32_reg *reg_arch_info = calloc(TOTAL_REG_NUM, sizeof(struct nds32_reg));
 	int i;
@@ -415,16 +419,61 @@ static struct reg_cache *nds32_build_reg_cache(struct target *target,
 		reg_arch_info[i].enable = false;
 
 		reg_list[i].name = nds32_reg_simple_name(i);
+		reg_list[i].number = reg_arch_info[i].num;
 		reg_list[i].size = nds32_reg_size(i);
 		reg_list[i].arch_info = &reg_arch_info[i];
+
+		reg_list[i].reg_data_type = calloc(sizeof(struct reg_data_type), 1);
 
 		if (FD0 <= reg_arch_info[i].num && reg_arch_info[i].num <= FD31) {
 			reg_list[i].value = &(reg_arch_info[i].value_64);
 			reg_list[i].type = &nds32_reg_access_type_64;
+
+			reg_list[i].reg_data_type->type = REG_TYPE_IEEE_DOUBLE;
+			reg_list[i].reg_data_type->id = "ieee_double";
+			reg_list[i].group = "float";
 		} else {
 			reg_list[i].value = &(reg_arch_info[i].value);
 			reg_list[i].type = &nds32_reg_access_type;
+			reg_list[i].group = "general";
+
+			if ((FS0 <= reg_arch_info[i].num) && (reg_arch_info[i].num <= FS31)) {
+				reg_list[i].reg_data_type->type = REG_TYPE_IEEE_SINGLE;
+				reg_list[i].reg_data_type->id = "ieee_single";
+				reg_list[i].group = "float";
+			} else if ((reg_arch_info[i].num == FPCSR) ||
+				   (reg_arch_info[i].num == FPCFG)) {
+				reg_list[i].group = "float";
+			} else if ((reg_arch_info[i].num == R28) ||
+				   (reg_arch_info[i].num == R29) ||
+				   (reg_arch_info[i].num == R31)) {
+				reg_list[i].reg_data_type->type = REG_TYPE_DATA_PTR;
+				reg_list[i].reg_data_type->id = "data_ptr";
+			} else if ((reg_arch_info[i].num == R30) ||
+				   (reg_arch_info[i].num == PC)) {
+				reg_list[i].reg_data_type->type = REG_TYPE_CODE_PTR;
+				reg_list[i].reg_data_type->id = "code_ptr";
+			} else {
+				reg_list[i].reg_data_type->type = REG_TYPE_UINT32;
+				reg_list[i].reg_data_type->id = "uint32";
+			}
 		}
+
+		if (R16 <= reg_arch_info[i].num && reg_arch_info[i].num <= R25)
+			reg_list[i].caller_save = true;
+		else
+			reg_list[i].caller_save = false;
+
+		reg_list[i].feature = malloc(sizeof(struct reg_feature));
+
+		if (R0 <= reg_arch_info[i].num && reg_arch_info[i].num <= IFC_LP)
+			reg_list[i].feature->name = "org.gnu.gdb.nds32.core";
+		else if (CR0 <= reg_arch_info[i].num && reg_arch_info[i].num <= SECUR0)
+			reg_list[i].feature->name = "org.gnu.gdb.nds32.system";
+		else if (D0L24 <= reg_arch_info[i].num && reg_arch_info[i].num <= CBE3)
+			reg_list[i].feature->name = "org.gnu.gdb.nds32.audio";
+		else if (FPCSR <= reg_arch_info[i].num && reg_arch_info[i].num <= FD31)
+			reg_list[i].feature->name = "org.gnu.gdb.nds32.fpu";
 
 		cache->num_regs++;
 	}
@@ -451,9 +500,7 @@ static struct reg *nds32_reg_current(struct nds32 *nds32, unsigned regnum)
 {
 	struct reg *r;
 
-	/* Register mapping, pass user-view registers to gdb */
-	int mapped_regnum = nds32->register_map(nds32, regnum);
-	r = nds32->core_cache->reg_list + mapped_regnum;
+	r = nds32->core_cache->reg_list + regnum;
 
 	return r;
 }
@@ -512,12 +559,36 @@ int nds32_set_mapped_reg(struct nds32 *nds32, unsigned regnum, uint32_t value)
 	return r->type->set(r, set_value);
 }
 
-/** get all register list */
-int nds32_get_gdb_reg_list(struct target *target,
+/** get general register list */
+static int nds32_get_general_reg_list(struct nds32 *nds32,
 		struct reg **reg_list[], int *reg_list_size)
 {
-	struct nds32 *nds32 = target_to_nds32(target);
+	struct reg *reg_current;
+	int i;
+	int current_idx;
+
+	/** freed in gdb_server.c */
+	*reg_list = malloc(sizeof(struct reg *) * (IFC_LP - R0 + 1));
+	current_idx = 0;
+
+	for (i = R0; i < IFC_LP + 1; i++) {
+		reg_current = nds32_reg_current(nds32, i);
+		if (((struct nds32_reg *)reg_current->arch_info)->enable) {
+			(*reg_list)[current_idx] = reg_current;
+			current_idx++;
+		}
+	}
+	*reg_list_size = current_idx;
+
+	return ERROR_OK;
+}
+
+/** get all register list */
+static int nds32_get_all_reg_list(struct nds32 *nds32,
+		struct reg **reg_list[], int *reg_list_size)
+{
 	struct reg_cache *reg_cache = nds32->core_cache;
+	struct reg *reg_current;
 	unsigned int i;
 
 	*reg_list_size = reg_cache->num_regs;
@@ -525,10 +596,33 @@ int nds32_get_gdb_reg_list(struct target *target,
 	/** freed in gdb_server.c */
 	*reg_list = malloc(sizeof(struct reg *) * (*reg_list_size));
 
-	for (i = 0; i < reg_cache->num_regs; i++)
-		(*reg_list)[i] = nds32_reg_current(nds32, i);
+	for (i = 0; i < reg_cache->num_regs; i++) {
+		reg_current = nds32_reg_current(nds32, i);
+		reg_current->exist = ((struct nds32_reg *)
+				reg_current->arch_info)->enable;
+		(*reg_list)[i] = reg_current;
+	}
 
 	return ERROR_OK;
+}
+
+/** get all register list */
+int nds32_get_gdb_reg_list(struct target *target,
+		struct reg **reg_list[], int *reg_list_size,
+		enum target_register_class reg_class)
+{
+	struct nds32 *nds32 = target_to_nds32(target);
+
+	switch (reg_class) {
+		case REG_CLASS_ALL:
+			return nds32_get_all_reg_list(nds32, reg_list, reg_list_size);
+		case REG_CLASS_GENERAL:
+			return nds32_get_general_reg_list(nds32, reg_list, reg_list_size);
+		default:
+			return ERROR_FAIL;
+	}
+
+	return ERROR_FAIL;
 }
 
 static int nds32_select_memory_mode(struct target *target, uint32_t address,
@@ -1451,8 +1545,8 @@ int nds32_restore_context(struct target *target)
 			if (reg->valid == true) {
 
 				LOG_DEBUG("examining dirty reg: %s", reg->name);
-				LOG_DEBUG("writing register %i "
-						"with value 0x%8.8" PRIx32, i, buf_get_u32(reg->value, 0, 32));
+				LOG_DEBUG("writing register %d with value 0x%8.8" PRIx32,
+						i, buf_get_u32(reg->value, 0, 32));
 
 				reg_arch_info = reg->arch_info;
 				if (FD0 <= reg_arch_info->num && reg_arch_info->num <= FD31)
@@ -1478,7 +1572,7 @@ int nds32_edm_config(struct nds32 *nds32)
 	aice_read_debug_reg(aice, NDS_EDM_SR_EDM_CFG, &edm_cfg);
 
 	nds32->edm.version = (edm_cfg >> 16) & 0xFFFF;
-	LOG_INFO("EDM version 0x%04" PRIx32, nds32->edm.version);
+	LOG_INFO("EDM version 0x%04x", nds32->edm.version);
 
 	nds32->edm.breakpoint_num = (edm_cfg & 0x7) + 1;
 
@@ -1550,7 +1644,20 @@ int nds32_init_arch_info(struct target *target, struct nds32 *nds32)
 	nds32->reset_halt_as_examine = false;
 	nds32->keep_target_edm_ctl = false;
 	nds32->word_access_mem = false;
-	nds32->virtual_hosting = false;
+	nds32->virtual_hosting = true;
+	nds32->hit_syscall = false;
+	nds32->active_syscall_id = NDS32_SYSCALL_UNDEFINED;
+	nds32->virtual_hosting_errno = 0;
+	nds32->virtual_hosting_ctrl_c = false;
+	nds32->attached = false;
+
+	nds32->syscall_break.asid = 0;
+	nds32->syscall_break.length = 4;
+	nds32->syscall_break.set = 0;
+	nds32->syscall_break.orig_instr = NULL;
+	nds32->syscall_break.next = NULL;
+	nds32->syscall_break.unique_id = 0x515CAll + target->target_number;
+	nds32->syscall_break.linked_BRP = 0;
 
 	nds32_reg_init();
 
@@ -1678,13 +1785,24 @@ int nds32_step(struct target *target, int current,
 		ir14_value &= ~(0x1 << 31);
 	nds32_set_mapped_reg(nds32, IR14, ir14_value);
 
+	/* check hit_syscall before leave_debug_state() because
+	 * leave_debug_state() may clear hit_syscall flag */
+	bool no_step = false;
+	if (nds32->hit_syscall)
+		/* step after hit_syscall should be ignored because
+		 * leave_debug_state will step implicitly to skip the
+		 * syscall */
+		no_step = true;
+
 	/********* TODO: maybe create another function to handle this part */
 	CHECK_RETVAL(nds32->leave_debug_state(nds32, true));
 	CHECK_RETVAL(target_call_event_callbacks(target, TARGET_EVENT_RESUMED));
 
-	struct aice_port_s *aice = target_to_aice(target);
-	if (ERROR_OK != aice_step(aice))
-		return ERROR_FAIL;
+	if (no_step == false) {
+		struct aice_port_s *aice = target_to_aice(target);
+		if (ERROR_OK != aice_step(aice))
+			return ERROR_FAIL;
+	}
 
 	/* save state */
 	CHECK_RETVAL(nds32->enter_debug_state(nds32, true));
@@ -1784,6 +1902,12 @@ int nds32_examine_debug_reason(struct nds32 *nds32)
 	uint32_t reason;
 	struct target *target = nds32->target;
 
+	if (nds32->hit_syscall == true) {
+		LOG_DEBUG("Hit syscall breakpoint");
+		target->debug_reason = DBG_REASON_BREAKPOINT;
+		return ERROR_OK;
+	}
+
 	nds32->get_debug_reason(nds32, &reason);
 
 	LOG_DEBUG("nds32 examines debug reason: %s", nds32_debug_type_name[reason]);
@@ -1806,7 +1930,13 @@ int nds32_examine_debug_reason(struct nds32 *nds32)
 							&instruction))
 					return ERROR_FAIL;
 
-				target->debug_reason = DBG_REASON_BREAKPOINT;
+				/* hit 'break 0x7FFF' */
+				if ((instruction.info.opc_6 == 0x32) &&
+					(instruction.info.sub_opc == 0xA) &&
+					(instruction.info.imm == 0x7FFF)) {
+					target->debug_reason = DBG_REASON_EXIT;
+				} else
+					target->debug_reason = DBG_REASON_BREAKPOINT;
 			}
 			break;
 		case NDS32_DEBUG_DATA_ADDR_WATCHPOINT_PRECISE:
@@ -1878,7 +2008,7 @@ int nds32_login(struct nds32 *nds32)
 			code_str[copy_length] = '\0';
 			code = strtoul(code_str, NULL, 16);
 
-			sprintf(command_str, "write_misc gen_port0 0x%x;", code);
+			sprintf(command_str, "write_misc gen_port0 0x%" PRIx32 ";", code);
 			strcat(command_sequence, command_str);
 		}
 
@@ -1903,7 +2033,7 @@ int nds32_login(struct nds32 *nds32)
 			else
 				return ERROR_FAIL;
 
-			sprintf(command_str, "write_misc %s 0x%x;", reg_name, code);
+			sprintf(command_str, "write_misc %s 0x%" PRIx32 ";", reg_name, code);
 			if (ERROR_OK != aice_program_edm(aice, command_str))
 				return ERROR_FAIL;
 		}
@@ -1988,7 +2118,9 @@ int nds32_poll(struct target *target)
 int nds32_resume(struct target *target, int current,
 		uint32_t address, int handle_breakpoints, int debug_execution)
 {
-	LOG_DEBUG("current %d  address %08x  handle_breakpoints %d  debug_execution %d",
+	LOG_DEBUG("current %d address %08" PRIx32
+			" handle_breakpoints %d"
+			" debug_execution %d",
 			current, address, handle_breakpoints, debug_execution);
 
 	struct nds32 *nds32 = target_to_nds32(target);
@@ -2016,8 +2148,11 @@ int nds32_resume(struct target *target, int current,
 	CHECK_RETVAL(nds32->leave_debug_state(nds32, true));
 	CHECK_RETVAL(target_call_event_callbacks(target, TARGET_EVENT_RESUMED));
 
-	struct aice_port_s *aice = target_to_aice(target);
-	aice_run(aice);
+	if (nds32->virtual_hosting_ctrl_c == false) {
+		struct aice_port_s *aice = target_to_aice(target);
+		aice_run(aice);
+	} else
+		nds32->virtual_hosting_ctrl_c = false;
 
 	target->debug_reason = DBG_REASON_NOTHALTED;
 	if (!debug_execution)
@@ -2031,16 +2166,41 @@ int nds32_resume(struct target *target, int current,
 	return ERROR_OK;
 }
 
+static int nds32_soft_reset_halt(struct target *target)
+{
+	/* TODO: test it */
+	struct nds32 *nds32 = target_to_nds32(target);
+	struct aice_port_s *aice = target_to_aice(target);
+
+	aice_assert_srst(aice, AICE_SRST);
+
+	/* halt core and set pc to 0x0 */
+	int retval = target_halt(target);
+	if (retval != ERROR_OK)
+		return retval;
+
+	/* start fetching from IVB */
+	uint32_t value_ir3;
+	nds32_get_mapped_reg(nds32, IR3, &value_ir3);
+	nds32_set_mapped_reg(nds32, PC, value_ir3 & 0xFFFF0000);
+
+	return ERROR_OK;
+}
+
 int nds32_assert_reset(struct target *target)
 {
 	struct nds32 *nds32 = target_to_nds32(target);
 	struct aice_port_s *aice = target_to_aice(target);
-
-	jtag_poll_set_enabled(true);
+	struct nds32_cpu_version *cpu_version = &(nds32->cpu_version);
 
 	if (target->reset_halt) {
-		if (nds32->soft_reset_halt)
-			target->type->soft_reset_halt(target);
+		if ((nds32->soft_reset_halt)
+			|| (nds32->edm.version < 0x51)
+			|| ((nds32->edm.version == 0x51)
+				&& (cpu_version->revision == 0x1C)
+				&& (cpu_version->cpu_id_family == 0xC)
+				&& (cpu_version->cpu_id_version == 0x0)))
+			nds32_soft_reset_halt(target);
 		else
 			aice_assert_srst(aice, AICE_RESET_HOLD);
 	} else {
@@ -2059,25 +2219,21 @@ int nds32_assert_reset(struct target *target)
 	return ERROR_OK;
 }
 
-static uint32_t nds32_backup_edm_ctl;
-static bool gdb_attached;
-
 static int nds32_gdb_attach(struct nds32 *nds32)
 {
-	LOG_DEBUG("nds32_gdb_attach");
+	LOG_DEBUG("nds32_gdb_attach, target coreid: %" PRId32, nds32->target->coreid);
 
-	if (gdb_attached == false) {
+	if (nds32->attached == false) {
 
 		if (nds32->keep_target_edm_ctl) {
 			/* backup target EDM_CTL */
 			struct aice_port_s *aice = target_to_aice(nds32->target);
-			aice_read_debug_reg(aice, NDS_EDM_SR_EDM_CTL, &nds32_backup_edm_ctl);
+			aice_read_debug_reg(aice, NDS_EDM_SR_EDM_CTL, &nds32->backup_edm_ctl);
 		}
 
 		target_halt(nds32->target);
-		target_poll(nds32->target);
 
-		gdb_attached = true;
+		nds32->attached = true;
 	}
 
 	return ERROR_OK;
@@ -2088,7 +2244,7 @@ static int nds32_gdb_detach(struct nds32 *nds32)
 	LOG_DEBUG("nds32_gdb_detach");
 	bool backup_virtual_hosting_setting;
 
-	if (gdb_attached) {
+	if (nds32->attached) {
 
 		backup_virtual_hosting_setting = nds32->virtual_hosting;
 		/* turn off virtual hosting before resume as gdb-detach */
@@ -2099,13 +2255,10 @@ static int nds32_gdb_detach(struct nds32 *nds32)
 		if (nds32->keep_target_edm_ctl) {
 			/* restore target EDM_CTL */
 			struct aice_port_s *aice = target_to_aice(nds32->target);
-			aice_write_debug_reg(aice, NDS_EDM_SR_EDM_CTL, nds32_backup_edm_ctl);
+			aice_write_debug_reg(aice, NDS_EDM_SR_EDM_CTL, nds32->backup_edm_ctl);
 		}
 
-		/* turn off polling */
-		jtag_poll_set_enabled(false);
-
-		gdb_attached = false;
+		nds32->attached = false;
 	}
 
 	return ERROR_OK;
@@ -2115,7 +2268,12 @@ static int nds32_callback_event_handler(struct target *target,
 		enum target_event event, void *priv)
 {
 	int retval = ERROR_OK;
-	struct nds32 *nds32 = priv;
+	int target_number = *(int *)priv;
+
+	if (target_number != target->target_number)
+		return ERROR_OK;
+
+	struct nds32 *nds32 = target_to_nds32(target);
 
 	switch (event) {
 		case TARGET_EVENT_GDB_ATTACH:
@@ -2136,13 +2294,316 @@ int nds32_init(struct nds32 *nds32)
 	/* Initialize anything we can set up without talking to the target */
 	nds32->memory.access_channel = NDS_MEMORY_ACC_CPU;
 
-	/* turn off polling by default */
-	jtag_poll_set_enabled(false);
-
 	/* register event callback */
-	target_register_event_callback(nds32_callback_event_handler, nds32);
+	target_register_event_callback(nds32_callback_event_handler,
+			&(nds32->target->target_number));
 
 	return ERROR_OK;
+}
+
+int nds32_get_gdb_fileio_info(struct target *target, struct gdb_fileio_info *fileio_info)
+{
+	/* fill syscall parameters to file-I/O info */
+	if (NULL == fileio_info) {
+		LOG_ERROR("Target has not initial file-I/O data structure");
+		return ERROR_FAIL;
+	}
+
+	struct nds32 *nds32 = target_to_nds32(target);
+	uint32_t value_ir6;
+	uint32_t syscall_id;
+
+	if (nds32->hit_syscall == false)
+		return ERROR_FAIL;
+
+	nds32_get_mapped_reg(nds32, IR6, &value_ir6);
+	syscall_id = (value_ir6 >> 16) & 0x7FFF;
+	nds32->active_syscall_id = syscall_id;
+
+	LOG_DEBUG("hit syscall ID: 0x%" PRIx32, syscall_id);
+
+	/* free previous identifier storage */
+	if (NULL != fileio_info->identifier) {
+		free(fileio_info->identifier);
+		fileio_info->identifier = NULL;
+	}
+
+	switch (syscall_id) {
+		case NDS32_SYSCALL_EXIT:
+			fileio_info->identifier = malloc(5);
+			sprintf(fileio_info->identifier, "exit");
+			nds32_get_mapped_reg(nds32, R0, &(fileio_info->param_1));
+			break;
+		case NDS32_SYSCALL_OPEN:
+			{
+				uint8_t filename[256];
+				fileio_info->identifier = malloc(5);
+				sprintf(fileio_info->identifier, "open");
+				nds32_get_mapped_reg(nds32, R0, &(fileio_info->param_1));
+				/* reserve fileio_info->param_2 for length of path */
+				nds32_get_mapped_reg(nds32, R1, &(fileio_info->param_3));
+				nds32_get_mapped_reg(nds32, R2, &(fileio_info->param_4));
+
+				target->type->read_buffer(target, fileio_info->param_1,
+						256, filename);
+				fileio_info->param_2 = strlen((char *)filename) + 1;
+			}
+			break;
+		case NDS32_SYSCALL_CLOSE:
+			fileio_info->identifier = malloc(6);
+			sprintf(fileio_info->identifier, "close");
+			nds32_get_mapped_reg(nds32, R0, &(fileio_info->param_1));
+			break;
+		case NDS32_SYSCALL_READ:
+			fileio_info->identifier = malloc(5);
+			sprintf(fileio_info->identifier, "read");
+			nds32_get_mapped_reg(nds32, R0, &(fileio_info->param_1));
+			nds32_get_mapped_reg(nds32, R1, &(fileio_info->param_2));
+			nds32_get_mapped_reg(nds32, R2, &(fileio_info->param_3));
+			break;
+		case NDS32_SYSCALL_WRITE:
+			fileio_info->identifier = malloc(6);
+			sprintf(fileio_info->identifier, "write");
+			nds32_get_mapped_reg(nds32, R0, &(fileio_info->param_1));
+			nds32_get_mapped_reg(nds32, R1, &(fileio_info->param_2));
+			nds32_get_mapped_reg(nds32, R2, &(fileio_info->param_3));
+			break;
+		case NDS32_SYSCALL_LSEEK:
+			fileio_info->identifier = malloc(6);
+			sprintf(fileio_info->identifier, "lseek");
+			nds32_get_mapped_reg(nds32, R0, &(fileio_info->param_1));
+			nds32_get_mapped_reg(nds32, R1, &(fileio_info->param_2));
+			nds32_get_mapped_reg(nds32, R2, &(fileio_info->param_3));
+			break;
+		case NDS32_SYSCALL_UNLINK:
+			{
+				uint8_t filename[256];
+				fileio_info->identifier = malloc(7);
+				sprintf(fileio_info->identifier, "unlink");
+				nds32_get_mapped_reg(nds32, R0, &(fileio_info->param_1));
+				/* reserve fileio_info->param_2 for length of path */
+
+				target->type->read_buffer(target, fileio_info->param_1,
+						256, filename);
+				fileio_info->param_2 = strlen((char *)filename) + 1;
+			}
+			break;
+		case NDS32_SYSCALL_RENAME:
+			{
+				uint8_t filename[256];
+				fileio_info->identifier = malloc(7);
+				sprintf(fileio_info->identifier, "rename");
+				nds32_get_mapped_reg(nds32, R0, &(fileio_info->param_1));
+				/* reserve fileio_info->param_2 for length of old path */
+				nds32_get_mapped_reg(nds32, R1, &(fileio_info->param_3));
+				/* reserve fileio_info->param_4 for length of new path */
+
+				target->type->read_buffer(target, fileio_info->param_1,
+						256, filename);
+				fileio_info->param_2 = strlen((char *)filename) + 1;
+
+				target->type->read_buffer(target, fileio_info->param_3,
+						256, filename);
+				fileio_info->param_4 = strlen((char *)filename) + 1;
+			}
+			break;
+		case NDS32_SYSCALL_FSTAT:
+			fileio_info->identifier = malloc(6);
+			sprintf(fileio_info->identifier, "fstat");
+			nds32_get_mapped_reg(nds32, R0, &(fileio_info->param_1));
+			nds32_get_mapped_reg(nds32, R1, &(fileio_info->param_2));
+			break;
+		case NDS32_SYSCALL_STAT:
+			{
+				uint8_t filename[256];
+				fileio_info->identifier = malloc(5);
+				sprintf(fileio_info->identifier, "stat");
+				nds32_get_mapped_reg(nds32, R0, &(fileio_info->param_1));
+				/* reserve fileio_info->param_2 for length of old path */
+				nds32_get_mapped_reg(nds32, R1, &(fileio_info->param_3));
+
+				target->type->read_buffer(target, fileio_info->param_1,
+						256, filename);
+				fileio_info->param_2 = strlen((char *)filename) + 1;
+			}
+			break;
+		case NDS32_SYSCALL_GETTIMEOFDAY:
+			fileio_info->identifier = malloc(13);
+			sprintf(fileio_info->identifier, "gettimeofday");
+			nds32_get_mapped_reg(nds32, R0, &(fileio_info->param_1));
+			nds32_get_mapped_reg(nds32, R1, &(fileio_info->param_2));
+			break;
+		case NDS32_SYSCALL_ISATTY:
+			fileio_info->identifier = malloc(7);
+			sprintf(fileio_info->identifier, "isatty");
+			nds32_get_mapped_reg(nds32, R0, &(fileio_info->param_1));
+			break;
+		case NDS32_SYSCALL_SYSTEM:
+			{
+				uint8_t command[256];
+				fileio_info->identifier = malloc(7);
+				sprintf(fileio_info->identifier, "system");
+				nds32_get_mapped_reg(nds32, R0, &(fileio_info->param_1));
+				/* reserve fileio_info->param_2 for length of old path */
+
+				target->type->read_buffer(target, fileio_info->param_1,
+						256, command);
+				fileio_info->param_2 = strlen((char *)command) + 1;
+			}
+			break;
+		case NDS32_SYSCALL_ERRNO:
+			fileio_info->identifier = malloc(6);
+			sprintf(fileio_info->identifier, "errno");
+			nds32_set_mapped_reg(nds32, R0, nds32->virtual_hosting_errno);
+			break;
+		default:
+			fileio_info->identifier = malloc(8);
+			sprintf(fileio_info->identifier, "unknown");
+			break;
+	}
+
+	return ERROR_OK;
+}
+
+int nds32_gdb_fileio_end(struct target *target, int retcode, int fileio_errno, bool ctrl_c)
+{
+	LOG_DEBUG("syscall return code: 0x%x, errno: 0x%x , ctrl_c: %s",
+			retcode, fileio_errno, ctrl_c ? "true" : "false");
+
+	struct nds32 *nds32 = target_to_nds32(target);
+
+	nds32_set_mapped_reg(nds32, R0, (uint32_t)retcode);
+
+	nds32->virtual_hosting_errno = fileio_errno;
+	nds32->virtual_hosting_ctrl_c = ctrl_c;
+	nds32->active_syscall_id = NDS32_SYSCALL_UNDEFINED;
+
+	return ERROR_OK;
+}
+
+int nds32_profiling(struct target *target, uint32_t *samples,
+			uint32_t max_num_samples, uint32_t *num_samples, uint32_t seconds)
+{
+	/* sample $PC every 10 milliseconds */
+	uint32_t iteration = seconds * 100;
+	struct aice_port_s *aice = target_to_aice(target);
+	struct nds32 *nds32 = target_to_nds32(target);
+
+	if (max_num_samples < iteration)
+		iteration = max_num_samples;
+
+	int pc_regnum = nds32->register_map(nds32, PC);
+	aice_profiling(aice, 10, iteration, pc_regnum, samples, num_samples);
+
+	register_cache_invalidate(nds32->core_cache);
+
+	return ERROR_OK;
+}
+
+int nds32_gdb_fileio_write_memory(struct nds32 *nds32, uint32_t address,
+		uint32_t size, const uint8_t *buffer)
+{
+	if ((NDS32_SYSCALL_FSTAT == nds32->active_syscall_id) ||
+			(NDS32_SYSCALL_STAT == nds32->active_syscall_id)) {
+		/* If doing GDB file-I/O, target should convert 'struct stat'
+		 * from gdb-format to target-format */
+		uint8_t stat_buffer[NDS32_STRUCT_STAT_SIZE];
+		/* st_dev 2 */
+		stat_buffer[0] = buffer[3];
+		stat_buffer[1] = buffer[2];
+		/* st_ino 2 */
+		stat_buffer[2] = buffer[7];
+		stat_buffer[3] = buffer[6];
+		/* st_mode 4 */
+		stat_buffer[4] = buffer[11];
+		stat_buffer[5] = buffer[10];
+		stat_buffer[6] = buffer[9];
+		stat_buffer[7] = buffer[8];
+		/* st_nlink 2 */
+		stat_buffer[8] = buffer[15];
+		stat_buffer[9] = buffer[16];
+		/* st_uid 2 */
+		stat_buffer[10] = buffer[19];
+		stat_buffer[11] = buffer[18];
+		/* st_gid 2 */
+		stat_buffer[12] = buffer[23];
+		stat_buffer[13] = buffer[22];
+		/* st_rdev 2 */
+		stat_buffer[14] = buffer[27];
+		stat_buffer[15] = buffer[26];
+		/* st_size 4 */
+		stat_buffer[16] = buffer[35];
+		stat_buffer[17] = buffer[34];
+		stat_buffer[18] = buffer[33];
+		stat_buffer[19] = buffer[32];
+		/* st_atime 4 */
+		stat_buffer[20] = buffer[55];
+		stat_buffer[21] = buffer[54];
+		stat_buffer[22] = buffer[53];
+		stat_buffer[23] = buffer[52];
+		/* st_spare1 4 */
+		stat_buffer[24] = 0;
+		stat_buffer[25] = 0;
+		stat_buffer[26] = 0;
+		stat_buffer[27] = 0;
+		/* st_mtime 4 */
+		stat_buffer[28] = buffer[59];
+		stat_buffer[29] = buffer[58];
+		stat_buffer[30] = buffer[57];
+		stat_buffer[31] = buffer[56];
+		/* st_spare2 4 */
+		stat_buffer[32] = 0;
+		stat_buffer[33] = 0;
+		stat_buffer[34] = 0;
+		stat_buffer[35] = 0;
+		/* st_ctime 4 */
+		stat_buffer[36] = buffer[63];
+		stat_buffer[37] = buffer[62];
+		stat_buffer[38] = buffer[61];
+		stat_buffer[39] = buffer[60];
+		/* st_spare3 4 */
+		stat_buffer[40] = 0;
+		stat_buffer[41] = 0;
+		stat_buffer[42] = 0;
+		stat_buffer[43] = 0;
+		/* st_blksize 4 */
+		stat_buffer[44] = buffer[43];
+		stat_buffer[45] = buffer[42];
+		stat_buffer[46] = buffer[41];
+		stat_buffer[47] = buffer[40];
+		/* st_blocks 4 */
+		stat_buffer[48] = buffer[51];
+		stat_buffer[49] = buffer[50];
+		stat_buffer[50] = buffer[49];
+		stat_buffer[51] = buffer[48];
+		/* st_spare4 8 */
+		stat_buffer[52] = 0;
+		stat_buffer[53] = 0;
+		stat_buffer[54] = 0;
+		stat_buffer[55] = 0;
+		stat_buffer[56] = 0;
+		stat_buffer[57] = 0;
+		stat_buffer[58] = 0;
+		stat_buffer[59] = 0;
+
+		return nds32_write_buffer(nds32->target, address, NDS32_STRUCT_STAT_SIZE, stat_buffer);
+	} else if (NDS32_SYSCALL_GETTIMEOFDAY == nds32->active_syscall_id) {
+		/* If doing GDB file-I/O, target should convert 'struct timeval'
+		 * from gdb-format to target-format */
+		uint8_t timeval_buffer[NDS32_STRUCT_TIMEVAL_SIZE];
+		timeval_buffer[0] = buffer[3];
+		timeval_buffer[1] = buffer[2];
+		timeval_buffer[2] = buffer[1];
+		timeval_buffer[3] = buffer[0];
+		timeval_buffer[4] = buffer[11];
+		timeval_buffer[5] = buffer[10];
+		timeval_buffer[6] = buffer[9];
+		timeval_buffer[7] = buffer[8];
+
+		return nds32_write_buffer(nds32->target, address, NDS32_STRUCT_TIMEVAL_SIZE, timeval_buffer);
+	}
+
+	return nds32_write_buffer(nds32->target, address, size, buffer);
 }
 
 int nds32_reset_halt(struct nds32 *nds32)

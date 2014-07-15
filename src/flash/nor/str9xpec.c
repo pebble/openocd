@@ -565,7 +565,7 @@ static int str9xpec_set_address(struct flash_bank *bank, uint8_t sector)
 	return ERROR_OK;
 }
 
-static int str9xpec_write(struct flash_bank *bank, uint8_t *buffer,
+static int str9xpec_write(struct flash_bank *bank, const uint8_t *buffer,
 		uint32_t offset, uint32_t count)
 {
 	struct str9xpec_flash_controller *str9xpec_info = bank->driver_priv;
@@ -758,12 +758,6 @@ COMMAND_HANDLER(str9xpec_handle_part_id_command)
 static int str9xpec_erase_check(struct flash_bank *bank)
 {
 	return str9xpec_blank_check(bank, 0, bank->num_sectors - 1);
-}
-
-static int get_str9xpec_info(struct flash_bank *bank, char *buf, int buf_size)
-{
-	snprintf(buf, buf_size, "str9xpec flash driver info");
-	return ERROR_OK;
 }
 
 COMMAND_HANDLER(str9xpec_handle_flash_options_read_command)
@@ -1215,5 +1209,4 @@ struct flash_driver str9xpec_flash = {
 	.auto_probe = str9xpec_probe,
 	.erase_check = str9xpec_erase_check,
 	.protect_check = str9xpec_protect_check,
-	.info = get_str9xpec_info,
 };

@@ -10,6 +10,8 @@ libocdflashnor_la_SOURCES = \
 NOR_DRIVERS = \
 	aduc702x.c \
 	at91sam4.c \
+	at91sam4l.c \
+	at91samd.c \
 	at91sam3.c \
 	at91sam7.c \
 	avrf.c \
@@ -21,6 +23,7 @@ NOR_DRIVERS = \
 	lpc288x.c \
 	lpc2900.c \
 	lpcspifi.c \
+	mdr.c \
 	non_cfi.c \
 	ocl.c \
 	pic32mx.c \
@@ -37,7 +40,10 @@ NOR_DRIVERS = \
 	virtual.c \
 	fm3.c \
 	dsp5680xx_flash.c \
-	kinetis.c
+	kinetis.c \
+	mini51.c \
+	nuc1x.c \
+	nrf51.c
 
 noinst_HEADERS = \
 	core.h \

@@ -103,7 +103,7 @@ static void arm7_9_assign_wp(struct arm7_9_common *arm7_9, struct breakpoint *br
 		arm7_9->wp_available--;
 	} else
 		LOG_ERROR("BUG: no hardware comparator available");
-	LOG_DEBUG("BPID: %d (0x%08" PRIx32 ") using hw wp: %d",
+	LOG_DEBUG("BPID: %" PRId32 " (0x%08" PRIx32 ") using hw wp: %d",
 			breakpoint->unique_id,
 			breakpoint->address,
 			breakpoint->set);
@@ -189,7 +189,7 @@ static int arm7_9_set_breakpoint(struct target *target, struct breakpoint *break
 	struct arm7_9_common *arm7_9 = target_to_arm7_9(target);
 	int retval = ERROR_OK;
 
-	LOG_DEBUG("BPID: %d, Address: 0x%08" PRIx32 ", Type: %d",
+	LOG_DEBUG("BPID: %" PRId32 ", Address: 0x%08" PRIx32 ", Type: %d",
 		breakpoint->unique_id,
 		breakpoint->address,
 		breakpoint->type);
@@ -301,7 +301,7 @@ static int arm7_9_unset_breakpoint(struct target *target, struct breakpoint *bre
 	int retval = ERROR_OK;
 	struct arm7_9_common *arm7_9 = target_to_arm7_9(target);
 
-	LOG_DEBUG("BPID: %d, Address: 0x%08" PRIx32,
+	LOG_DEBUG("BPID: %" PRId32 ", Address: 0x%08" PRIx32,
 		breakpoint->unique_id,
 		breakpoint->address);
 
@@ -311,7 +311,7 @@ static int arm7_9_unset_breakpoint(struct target *target, struct breakpoint *bre
 	}
 
 	if (breakpoint->type == BKPT_HARD) {
-		LOG_DEBUG("BPID: %d Releasing hw wp: %d",
+		LOG_DEBUG("BPID: %" PRId32 " Releasing hw wp: %d",
 			breakpoint->unique_id,
 			breakpoint->set);
 		if (breakpoint->set == 1) {
@@ -1719,7 +1719,7 @@ int arm7_9_resume(struct target *target,
 		breakpoint = breakpoint_find(target,
 				buf_get_u32(arm->pc->value, 0, 32));
 		if (breakpoint != NULL) {
-			LOG_DEBUG("unset breakpoint at 0x%8.8" PRIx32 " (id: %d)",
+			LOG_DEBUG("unset breakpoint at 0x%8.8" PRIx32 " (id: %" PRId32,
 				breakpoint->address,
 				breakpoint->unique_id);
 			retval = arm7_9_unset_breakpoint(target, breakpoint);
@@ -2469,6 +2469,37 @@ int arm7_9_write_memory(struct target *target,
 	return ERROR_OK;
 }
 
+int arm7_9_write_memory_opt(struct target *target,
+	uint32_t address,
+	uint32_t size,
+	uint32_t count,
+	const uint8_t *buffer)
+{
+	struct arm7_9_common *arm7_9 = target_to_arm7_9(target);
+	int retval;
+
+	if (size == 4 && count > 32 && arm7_9->bulk_write_memory) {
+		/* Attempt to do a bulk write */
+		retval = arm7_9->bulk_write_memory(target, address, count, buffer);
+
+		if (retval == ERROR_OK)
+			return ERROR_OK;
+	}
+
+	return arm7_9->write_memory(target, address, size, count, buffer);
+}
+
+int arm7_9_write_memory_no_opt(struct target *target,
+	uint32_t address,
+	uint32_t size,
+	uint32_t count,
+	const uint8_t *buffer)
+{
+	struct arm7_9_common *arm7_9 = target_to_arm7_9(target);
+
+	return arm7_9->write_memory(target, address, size, count, buffer);
+}
+
 static int dcc_count;
 static const uint8_t *dcc_buffer;
 
@@ -2545,10 +2576,12 @@ int arm7_9_bulk_write_memory(struct target *target,
 {
 	int retval;
 	struct arm7_9_common *arm7_9 = target_to_arm7_9(target);
-	int i;
+
+	if (address % 4 != 0)
+		return ERROR_TARGET_UNALIGNED_ACCESS;
 
 	if (!arm7_9->dcc_downloads)
-		return target_write_memory(target, address, 4, count, buffer);
+		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 
 	/* regrab previously allocated working_area, or allocate a new one */
 	if (!arm7_9->dcc_working_area) {
@@ -2557,15 +2590,15 @@ int arm7_9_bulk_write_memory(struct target *target,
 		/* make sure we have a working area */
 		if (target_alloc_working_area(target, 24, &arm7_9->dcc_working_area) != ERROR_OK) {
 			LOG_INFO("no working area available, falling back to memory writes");
-			return target_write_memory(target, address, 4, count, buffer);
+			return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 		}
 
 		/* copy target instructions to target endianness */
-		for (i = 0; i < 6; i++)
-			target_buffer_set_u32(target, dcc_code_buf + i*4, dcc_code[i]);
+		target_buffer_set_u32_array(target, dcc_code_buf, ARRAY_SIZE(dcc_code), dcc_code);
 
-		/* write DCC code to working area */
-		retval = target_write_memory(target,
+		/* write DCC code to working area, using the non-optimized
+		 * memory write to avoid ending up here again */
+		retval = arm7_9_write_memory_no_opt(target,
 				arm7_9->dcc_working_area->address, 4, 6, dcc_code_buf);
 		if (retval != ERROR_OK)
 			return retval;

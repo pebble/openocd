@@ -232,6 +232,9 @@ int get_flash_bank_by_addr(struct target *target,
 
 	/* cycle through bank list */
 	for (c = flash_banks; c; c = c->next) {
+		if (c->target != target)
+			continue;
+
 		int retval;
 		retval = c->driver->auto_probe(c);
 
@@ -240,7 +243,7 @@ int get_flash_bank_by_addr(struct target *target,
 			return retval;
 		}
 		/* check whether address belongs to this flash bank */
-		if ((addr >= c->base) && (addr <= c->base + (c->size - 1)) && target == c->target) {
+		if ((addr >= c->base) && (addr <= c->base + (c->size - 1))) {
 			*result_bank = c;
 			return ERROR_OK;
 		}
@@ -595,7 +598,7 @@ int flash_write_unlock(struct target *target, struct image *image,
 		if (retval != ERROR_OK)
 			goto done;
 		if (c == NULL) {
-			LOG_WARNING("no flash bank found for address %x", run_address);
+			LOG_WARNING("no flash bank found for address %" PRIx32, run_address);
 			section++;	/* and skip it */
 			section_offset = 0;
 			continue;
@@ -710,7 +713,7 @@ int flash_write_unlock(struct target *target, struct image *image,
 
 			/* see if we need to pad the section */
 			while (padding[section]--)
-				(buffer + buffer_size)[size_read++] = 0xff;
+				(buffer + buffer_size)[size_read++] = c->default_padded_value;
 
 			buffer_size += size_read;
 			section_offset += size_read;

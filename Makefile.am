@@ -10,7 +10,7 @@ nobase_dist_pkgdata_DATA = \
 	contrib/libdcc/dcc_stdio.h \
 	contrib/libdcc/example.c \
 	contrib/libdcc/README \
-	contrib/openocd.udev
+	contrib/99-openocd.rules
 
 if INTERNAL_JIMTCL
 SUBDIRS = jimtcl
@@ -24,10 +24,14 @@ EXTRA_DIST = \
 	BUGS \
 	HACKING \
 	NEWTAPS \
-	README.Win32 \
+	README.Windows \
+	README.OSX \
+	$(wildcard $(srcdir)/NEWS*) \
 	Doxyfile.in \
 	tools/logger.pl \
-	contrib/loaders
+	tools/rlink_make_speed_table \
+	tools/st7_dtc_as \
+	contrib
 
 libtool: $(LIBTOOL_DEPS)
 	$(SHELL) ./config.status --recheck
@@ -89,7 +93,7 @@ uninstall-hook:
 distclean-local:
 	rm -rf Doxyfile doxygen
 	rm -f $(srcdir)/jimtcl/configure.gnu
-	
+
 DISTCLEANFILES = doxygen.log
 
 MAINTAINERCLEANFILES = \

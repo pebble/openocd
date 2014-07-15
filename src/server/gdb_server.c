@@ -14,6 +14,12 @@
  *   Copyright (C) ST-Ericsson SA 2011                                     *
  *   michel.jaouen@stericsson.com : smp minimum support                    *
  *                                                                         *
+ *   Copyright (C) 2013 Andes Technology                                   *
+ *   Hsiangkai Wang <hkwang@andestech.com>                                 *
+ *                                                                         *
+ *   Copyright (C) 2013 Franck Jullien                                     *
+ *   elec4fun@gmail.com                                                    *
+ *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
  *   the Free Software Foundation; either version 2 of the License, or     *
@@ -54,6 +60,11 @@
  * found in most modern embedded processors.
  */
 
+struct target_desc_format {
+	char *tdesc;
+	uint32_t tdesc_length;
+};
+
 /* private connection data for GDB */
 struct gdb_connection {
 	char buffer[GDB_BUFFER_SIZE];
@@ -79,6 +90,8 @@ struct gdb_connection {
 	 * normally we reply with a S reply via gdb_last_signal_packet.
 	 * as a side note this behaviour only effects gdb > 6.8 */
 	bool attached;
+	/* temporarily used for target description support */
+	struct target_desc_format target_desc;
 };
 
 #if 0
@@ -91,8 +104,8 @@ static int gdb_breakpoint_override;
 static enum breakpoint_type gdb_breakpoint_override_type;
 
 static int gdb_error(struct connection *connection, int retval);
-static const char *gdb_port;
-static const char *gdb_port_next;
+static char *gdb_port;
+static char *gdb_port_next;
 
 static void gdb_log_callback(void *priv, const char *file, unsigned line,
 		const char *function, const char *string);
@@ -113,6 +126,14 @@ static int gdb_flash_program = 1;
  * Disabled by default.
  */
 static int gdb_report_data_abort;
+
+/* set if we are sending target descriptions to gdb
+ * via qXfer:features:read packet */
+/* enabled by default */
+static int gdb_use_target_description = 1;
+
+/* current processing free-run type, used by file-I/O */
+static char gdb_running_type;
 
 static int gdb_last_signal(struct target *target)
 {
@@ -596,11 +617,21 @@ static int gdb_get_packet_inner(struct connection *connection,
 				case '$':
 					break;
 				case '+':
-					/* gdb sends a dummy ack '+' at every remote connect - see
-					 * remote_start_remote (remote.c)
-					 * in case anyone tries to debug why they receive this
-					 * warning every time */
-					LOG_WARNING("acknowledgment received, but no packet pending");
+					/* According to the GDB documentation
+					 * (https://sourceware.org/gdb/onlinedocs/gdb/Packet-Acknowledgment.html):
+					 * "gdb sends a final `+` acknowledgment of the stub's `OK`
+					 * response, which can be safely ignored by the stub."
+					 * However OpenOCD server already is in noack mode at this
+					 * point and instead of ignoring this it was emitting a
+					 * warning. This code makes server ignore the first ACK
+					 * that will be received after going into noack mode,
+					 * warning only about subsequent ACK's. */
+					if (gdb_con->noack_mode > 1) {
+						LOG_WARNING("acknowledgment received, but no packet pending");
+					} else {
+						LOG_DEBUG("Received first acknowledgment after entering noack mode. Ignoring it.");
+						gdb_con->noack_mode = 2;
+					}
 					break;
 				case '-':
 					LOG_WARNING("negative acknowledgment, but no packet pending");
@@ -680,6 +711,146 @@ static int gdb_output(struct command_context *context, const char *line)
 	return ERROR_OK;
 }
 
+static void gdb_signal_reply(struct target *target, struct connection *connection)
+{
+	struct gdb_connection *gdb_connection = connection->priv;
+	char sig_reply[20];
+	char stop_reason[20];
+	int sig_reply_len;
+	int signal_var;
+
+	if (target->debug_reason == DBG_REASON_EXIT) {
+		sig_reply_len = snprintf(sig_reply, sizeof(sig_reply), "W00");
+	} else {
+		if (gdb_connection->ctrl_c) {
+			signal_var = 0x2;
+			gdb_connection->ctrl_c = 0;
+		} else
+			signal_var = gdb_last_signal(target);
+
+		stop_reason[0] = '\0';
+		if (target->debug_reason == DBG_REASON_WATCHPOINT) {
+			enum watchpoint_rw hit_wp_type;
+			uint32_t hit_wp_address;
+
+			if (watchpoint_hit(target, &hit_wp_type, &hit_wp_address) == ERROR_OK) {
+
+				switch (hit_wp_type) {
+					case WPT_WRITE:
+						snprintf(stop_reason, sizeof(stop_reason),
+								"watch:%08" PRIx32 ";", hit_wp_address);
+						break;
+					case WPT_READ:
+						snprintf(stop_reason, sizeof(stop_reason),
+								"rwatch:%08" PRIx32 ";", hit_wp_address);
+						break;
+					case WPT_ACCESS:
+						snprintf(stop_reason, sizeof(stop_reason),
+								"awatch:%08" PRIx32 ";", hit_wp_address);
+						break;
+					default:
+						break;
+				}
+			}
+		}
+
+		sig_reply_len = snprintf(sig_reply, sizeof(sig_reply), "T%2.2x%s",
+				signal_var, stop_reason);
+	}
+
+	gdb_put_packet(connection, sig_reply, sig_reply_len);
+	gdb_connection->frontend_state = TARGET_HALTED;
+	rtos_update_threads(target);
+}
+
+static void gdb_fileio_reply(struct target *target, struct connection *connection)
+{
+	struct gdb_connection *gdb_connection = connection->priv;
+	char fileio_command[256];
+	int command_len;
+	bool program_exited = false;
+
+	if (strcmp(target->fileio_info->identifier, "open") == 0)
+		sprintf(fileio_command, "F%s,%" PRIx32 "/%" PRIx32 ",%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+				target->fileio_info->param_1,
+				target->fileio_info->param_2,
+				target->fileio_info->param_3,
+				target->fileio_info->param_4);
+	else if (strcmp(target->fileio_info->identifier, "close") == 0)
+		sprintf(fileio_command, "F%s,%" PRIx32, target->fileio_info->identifier,
+				target->fileio_info->param_1);
+	else if (strcmp(target->fileio_info->identifier, "read") == 0)
+		sprintf(fileio_command, "F%s,%" PRIx32 ",%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+				target->fileio_info->param_1,
+				target->fileio_info->param_2,
+				target->fileio_info->param_3);
+	else if (strcmp(target->fileio_info->identifier, "write") == 0)
+		sprintf(fileio_command, "F%s,%" PRIx32 ",%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+				target->fileio_info->param_1,
+				target->fileio_info->param_2,
+				target->fileio_info->param_3);
+	else if (strcmp(target->fileio_info->identifier, "lseek") == 0)
+		sprintf(fileio_command, "F%s,%" PRIx32 ",%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+				target->fileio_info->param_1,
+				target->fileio_info->param_2,
+				target->fileio_info->param_3);
+	else if (strcmp(target->fileio_info->identifier, "rename") == 0)
+		sprintf(fileio_command, "F%s,%" PRIx32 "/%" PRIx32 ",%" PRIx32 "/%" PRIx32, target->fileio_info->identifier,
+				target->fileio_info->param_1,
+				target->fileio_info->param_2,
+				target->fileio_info->param_3,
+				target->fileio_info->param_4);
+	else if (strcmp(target->fileio_info->identifier, "unlink") == 0)
+		sprintf(fileio_command, "F%s,%" PRIx32 "/%" PRIx32, target->fileio_info->identifier,
+				target->fileio_info->param_1,
+				target->fileio_info->param_2);
+	else if (strcmp(target->fileio_info->identifier, "stat") == 0)
+		sprintf(fileio_command, "F%s,%" PRIx32 "/%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+				target->fileio_info->param_1,
+				target->fileio_info->param_2,
+				target->fileio_info->param_3);
+	else if (strcmp(target->fileio_info->identifier, "fstat") == 0)
+		sprintf(fileio_command, "F%s,%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+				target->fileio_info->param_1,
+				target->fileio_info->param_2);
+	else if (strcmp(target->fileio_info->identifier, "gettimeofday") == 0)
+		sprintf(fileio_command, "F%s,%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+				target->fileio_info->param_1,
+				target->fileio_info->param_2);
+	else if (strcmp(target->fileio_info->identifier, "isatty") == 0)
+		sprintf(fileio_command, "F%s,%" PRIx32, target->fileio_info->identifier,
+				target->fileio_info->param_1);
+	else if (strcmp(target->fileio_info->identifier, "system") == 0)
+		sprintf(fileio_command, "F%s,%" PRIx32 "/%" PRIx32, target->fileio_info->identifier,
+				target->fileio_info->param_1,
+				target->fileio_info->param_2);
+	else if (strcmp(target->fileio_info->identifier, "exit") == 0) {
+		/* If target hits exit syscall, report to GDB the program is terminated.
+		 * In addition, let target run its own exit syscall handler. */
+		program_exited = true;
+		sprintf(fileio_command, "W%02" PRIx32, target->fileio_info->param_1);
+	} else {
+		LOG_DEBUG("Unknown syscall: %s", target->fileio_info->identifier);
+
+		/* encounter unknown syscall, continue */
+		gdb_connection->frontend_state = TARGET_RUNNING;
+		target_resume(target, 1, 0x0, 0, 0);
+		return;
+	}
+
+	command_len = strlen(fileio_command);
+	gdb_put_packet(connection, fileio_command, command_len);
+
+	if (program_exited) {
+		/* Use target_resume() to let target run its own exit syscall handler. */
+		gdb_connection->frontend_state = TARGET_RUNNING;
+		target_resume(target, 1, 0x0, 0, 0);
+	} else {
+		gdb_connection->frontend_state = TARGET_HALTED;
+		rtos_update_threads(target);
+	}
+}
+
 static void gdb_frontend_halted(struct target *target, struct connection *connection)
 {
 	struct gdb_connection *gdb_connection = connection->priv;
@@ -694,22 +865,14 @@ static void gdb_frontend_halted(struct target *target, struct connection *connec
 	 * that are to be ignored.
 	 */
 	if (gdb_connection->frontend_state == TARGET_RUNNING) {
-		char sig_reply[4];
-		int signal_var;
-
 		/* stop forwarding log packets! */
 		log_remove_callback(gdb_log_callback, connection);
 
-		if (gdb_connection->ctrl_c) {
-			signal_var = 0x2;
-			gdb_connection->ctrl_c = 0;
-		} else
-			signal_var = gdb_last_signal(target);
-
-		snprintf(sig_reply, 4, "T%2.2x", signal_var);
-		gdb_put_packet(connection, sig_reply, 3);
-		gdb_connection->frontend_state = TARGET_HALTED;
-		rtos_update_threads(target);
+		/* check fileio first */
+		if (target_get_gdb_fileio_info(target, target->fileio_info) == ERROR_OK)
+			gdb_fileio_reply(target, connection);
+		else
+			gdb_signal_reply(target, connection);
 	}
 }
 
@@ -718,6 +881,10 @@ static int gdb_target_callback_event_handler(struct target *target,
 {
 	int retval;
 	struct connection *connection = priv;
+	struct gdb_service *gdb_service = connection->service->priv;
+
+	if (gdb_service->target != target)
+		return ERROR_OK;
 
 	switch (event) {
 		case TARGET_EVENT_GDB_HALT:
@@ -756,9 +923,11 @@ static int gdb_new_connection(struct connection *connection)
 	gdb_connection->closed = 0;
 	gdb_connection->busy = 0;
 	gdb_connection->noack_mode = 0;
-	gdb_connection->sync = true;
+	gdb_connection->sync = false;
 	gdb_connection->mem_write_error = false;
 	gdb_connection->attached = true;
+	gdb_connection->target_desc.tdesc = NULL;
+	gdb_connection->target_desc.tdesc_length = 0;
 
 	/* send ACK to GDB for debug request */
 	gdb_write(connection, "+", 1);
@@ -798,6 +967,9 @@ static int gdb_new_connection(struct connection *connection)
 		int i;
 		for (i = 0; i < flash_get_bank_count(); i++) {
 			struct flash_bank *p;
+			p = get_flash_bank_by_num_noprobe(i);
+			if (p->target != gdb_service->target)
+				continue;
 			retval = get_flash_bank_by_num(i, &p);
 			if (retval != ERROR_OK) {
 				LOG_ERROR("Connect failed. Consider setting up a gdb-attach event for the target " \
@@ -872,7 +1044,7 @@ static void gdb_send_error(struct connection *connection, uint8_t the_error)
 }
 
 static int gdb_last_signal_packet(struct connection *connection,
-		char *packet, int packet_size)
+		char const *packet, int packet_size)
 {
 	struct target *target = get_target_from_connection(connection);
 	struct gdb_connection *gdb_con = connection->priv;
@@ -929,7 +1101,7 @@ static void gdb_str_to_target(struct target *target,
 
 /* copy over in register buffer */
 static void gdb_target_to_reg(struct target *target,
-		char *tstr, int str_len, uint8_t *bin)
+		char const *tstr, int str_len, uint8_t *bin)
 {
 	if (str_len % 2) {
 		LOG_ERROR("BUG: gdb value with uneven number of characters encountered");
@@ -950,7 +1122,7 @@ static void gdb_target_to_reg(struct target *target,
 }
 
 static int gdb_get_registers_packet(struct connection *connection,
-		char *packet, int packet_size)
+		char const *packet, int packet_size)
 {
 	struct target *target = get_target_from_connection(connection);
 	struct reg **reg_list;
@@ -968,7 +1140,8 @@ static int gdb_get_registers_packet(struct connection *connection,
 	if ((target->rtos != NULL) && (ERROR_OK == rtos_get_gdb_reg_list(connection)))
 		return ERROR_OK;
 
-	retval = target_get_gdb_reg_list(target, &reg_list, &reg_list_size);
+	retval = target_get_gdb_reg_list(target, &reg_list, &reg_list_size,
+			REG_CLASS_GENERAL);
 	if (retval != ERROR_OK)
 		return gdb_error(connection, retval);
 
@@ -1005,14 +1178,14 @@ static int gdb_get_registers_packet(struct connection *connection,
 }
 
 static int gdb_set_registers_packet(struct connection *connection,
-		char *packet, int packet_size)
+		char const *packet, int packet_size)
 {
 	struct target *target = get_target_from_connection(connection);
 	int i;
 	struct reg **reg_list;
 	int reg_list_size;
 	int retval;
-	char *packet_p;
+	char const *packet_p;
 
 #ifdef _DEBUG_GDB_IO_
 	LOG_DEBUG("-");
@@ -1027,7 +1200,8 @@ static int gdb_set_registers_packet(struct connection *connection,
 		return ERROR_SERVER_REMOTE_CLOSED;
 	}
 
-	retval = target_get_gdb_reg_list(target, &reg_list, &reg_list_size);
+	retval = target_get_gdb_reg_list(target, &reg_list, &reg_list_size,
+			REG_CLASS_GENERAL);
 	if (retval != ERROR_OK)
 		return gdb_error(connection, retval);
 
@@ -1059,7 +1233,7 @@ static int gdb_set_registers_packet(struct connection *connection,
 }
 
 static int gdb_get_register_packet(struct connection *connection,
-	char *packet, int packet_size)
+	char const *packet, int packet_size)
 {
 	struct target *target = get_target_from_connection(connection);
 	char *reg_packet;
@@ -1072,7 +1246,8 @@ static int gdb_get_register_packet(struct connection *connection,
 	LOG_DEBUG("-");
 #endif
 
-	retval = target_get_gdb_reg_list(target, &reg_list, &reg_list_size);
+	retval = target_get_gdb_reg_list(target, &reg_list, &reg_list_size,
+			REG_CLASS_ALL);
 	if (retval != ERROR_OK)
 		return gdb_error(connection, retval);
 
@@ -1097,7 +1272,7 @@ static int gdb_get_register_packet(struct connection *connection,
 }
 
 static int gdb_set_register_packet(struct connection *connection,
-	char *packet, int packet_size)
+	char const *packet, int packet_size)
 {
 	struct target *target = get_target_from_connection(connection);
 	char *separator;
@@ -1109,7 +1284,8 @@ static int gdb_set_register_packet(struct connection *connection,
 
 	LOG_DEBUG("-");
 
-	retval = target_get_gdb_reg_list(target, &reg_list, &reg_list_size);
+	retval = target_get_gdb_reg_list(target, &reg_list, &reg_list_size,
+			REG_CLASS_ALL);
 	if (retval != ERROR_OK)
 		return gdb_error(connection, retval);
 
@@ -1162,7 +1338,7 @@ static int gdb_error(struct connection *connection, int retval)
  * 8191 bytes by the looks of it. Why 8191 bytes instead of 8192?????
  */
 static int gdb_read_memory_packet(struct connection *connection,
-		char *packet, int packet_size)
+		char const *packet, int packet_size)
 {
 	struct target *target = get_target_from_connection(connection);
 	char *separator;
@@ -1185,6 +1361,12 @@ static int gdb_read_memory_packet(struct connection *connection,
 	}
 
 	len = strtoul(separator + 1, NULL, 16);
+
+	if (!len) {
+		LOG_WARNING("invalid read memory packet received (len == 0)");
+		gdb_put_packet(connection, NULL, 0);
+		return ERROR_OK;
+	}
 
 	buffer = malloc(len);
 
@@ -1227,7 +1409,7 @@ static int gdb_read_memory_packet(struct connection *connection,
 }
 
 static int gdb_write_memory_packet(struct connection *connection,
-		char *packet, int packet_size)
+		char const *packet, int packet_size)
 {
 	struct target *target = get_target_from_connection(connection);
 	char *separator;
@@ -1274,7 +1456,7 @@ static int gdb_write_memory_packet(struct connection *connection,
 }
 
 static int gdb_write_memory_binary_packet(struct connection *connection,
-		char *packet, int packet_size)
+		char const *packet, int packet_size)
 {
 	struct target *target = get_target_from_connection(connection);
 	char *separator;
@@ -1331,7 +1513,7 @@ static int gdb_write_memory_binary_packet(struct connection *connection,
 }
 
 static int gdb_step_continue_packet(struct connection *connection,
-		char *packet, int packet_size)
+		char const *packet, int packet_size)
 {
 	struct target *target = get_target_from_connection(connection);
 	int current = 0;
@@ -1340,12 +1522,12 @@ static int gdb_step_continue_packet(struct connection *connection,
 
 	LOG_DEBUG("-");
 
-	if (packet_size > 1) {
-		packet[packet_size] = 0;
+	if (packet_size > 1)
 		address = strtoul(packet + 1, NULL, 16);
-	} else
+	else
 		current = 1;
 
+	gdb_running_type = packet[0];
 	if (packet[0] == 'c') {
 		LOG_DEBUG("continue");
 		/* resume at current address, don't handle breakpoints, not debugging */
@@ -1359,7 +1541,7 @@ static int gdb_step_continue_packet(struct connection *connection,
 }
 
 static int gdb_breakpoint_watchpoint_packet(struct connection *connection,
-		char *packet, int packet_size)
+		char const *packet, int packet_size)
 {
 	struct target *target = get_target_from_connection(connection);
 	int type;
@@ -1487,29 +1669,31 @@ static void xml_printf(int *retval, char **xml, int *pos, int *size,
 	}
 }
 
-static int decode_xfer_read(char *buf, char **annex, int *ofs, unsigned int *len)
+static int decode_xfer_read(char const *buf, char **annex, int *ofs, unsigned int *len)
 {
-	char *separator;
-
-	/* Extract and NUL-terminate the annex. */
-	*annex = buf;
-	while (*buf && *buf != ':')
-		buf++;
-	if (*buf == '\0')
-		return -1;
-	*buf++ = 0;
+	/* Locate the annex. */
+	const char *annex_end = strchr(buf, ':');
+	if (annex_end == NULL)
+		return ERROR_FAIL;
 
 	/* After the read marker and annex, qXfer looks like a
 	 * traditional 'm' packet. */
-
-	*ofs = strtoul(buf, &separator, 16);
+	char *separator;
+	*ofs = strtoul(annex_end + 1, &separator, 16);
 
 	if (*separator != ',')
-		return -1;
+		return ERROR_FAIL;
 
 	*len = strtoul(separator + 1, NULL, 16);
 
-	return 0;
+	/* Extract the annex if needed */
+	if (annex != NULL) {
+		*annex = strndup(buf, annex_end - buf);
+		if (*annex == NULL)
+			return ERROR_FAIL;
+	}
+
+	return ERROR_OK;
 }
 
 static int compare_bank(const void *a, const void *b)
@@ -1527,7 +1711,7 @@ static int compare_bank(const void *a, const void *b)
 }
 
 static int gdb_memory_map(struct connection *connection,
-		char *packet, int packet_size)
+		char const *packet, int packet_size)
 {
 	/* We get away with only specifying flash here. Regions that are not
 	 * specified are treated as if we provided no memory map(if not we
@@ -1568,14 +1752,16 @@ static int gdb_memory_map(struct connection *connection,
 	banks = malloc(sizeof(struct flash_bank *)*flash_get_bank_count());
 
 	for (i = 0; i < flash_get_bank_count(); i++) {
+		p = get_flash_bank_by_num_noprobe(i);
+		if (p->target != target)
+			continue;
 		retval = get_flash_bank_by_num(i, &p);
 		if (retval != ERROR_OK) {
 			free(banks);
 			gdb_error(connection, retval);
 			return retval;
 		}
-		if (p->target == target)
-			banks[target_flash_banks++] = p;
+		banks[target_flash_banks++] = p;
 	}
 
 	qsort(banks, target_flash_banks, sizeof(struct flash_bank *),
@@ -1670,8 +1856,409 @@ static int gdb_memory_map(struct connection *connection,
 	return ERROR_OK;
 }
 
+static const char *gdb_get_reg_type_name(enum reg_type type)
+{
+	switch (type) {
+		case REG_TYPE_INT:
+			return "int";
+		case REG_TYPE_INT8:
+			return "int8";
+		case REG_TYPE_INT16:
+			return "int16";
+		case REG_TYPE_INT32:
+			return "int32";
+		case REG_TYPE_INT64:
+			return "int64";
+		case REG_TYPE_INT128:
+			return "int128";
+		case REG_TYPE_UINT8:
+			return "uint8";
+		case REG_TYPE_UINT16:
+			return "uint16";
+		case REG_TYPE_UINT32:
+			return "uint32";
+		case REG_TYPE_UINT64:
+			return "uint64";
+		case REG_TYPE_UINT128:
+			return "uint128";
+		case REG_TYPE_CODE_PTR:
+			return "code_ptr";
+		case REG_TYPE_DATA_PTR:
+			return "data_ptr";
+		case REG_TYPE_FLOAT:
+			return "float";
+		case REG_TYPE_IEEE_SINGLE:
+			return "ieee_single";
+		case REG_TYPE_IEEE_DOUBLE:
+			return "ieee_double";
+		case REG_TYPE_ARCH_DEFINED:
+			return "int"; /* return arbitrary string to avoid compile warning. */
+	}
+
+	return "int"; /* "int" as default value */
+}
+
+static int gdb_generate_reg_type_description(struct target *target,
+		char **tdesc, int *pos, int *size, struct reg_data_type *type)
+{
+	int retval = ERROR_OK;
+
+	if (type->type_class == REG_TYPE_CLASS_VECTOR) {
+		/* <vector id="id" type="type" count="count"/> */
+		xml_printf(&retval, tdesc, pos, size,
+				"<vector id=\"%s\" type=\"%s\" count=\"%d\"/>\n",
+				type->id, type->reg_type_vector->type->id,
+				type->reg_type_vector->count);
+
+	} else if (type->type_class == REG_TYPE_CLASS_UNION) {
+		/* <union id="id">
+		 *  <field name="name" type="type"/> ...
+		 * </union> */
+		xml_printf(&retval, tdesc, pos, size,
+				"<union id=\"%s\">\n",
+				type->id);
+
+		struct reg_data_type_union_field *field;
+		field = type->reg_type_union->fields;
+		while (field != NULL) {
+			xml_printf(&retval, tdesc, pos, size,
+					"<field name=\"%s\" type=\"%s\"/>\n",
+					field->name, field->type->id);
+
+			field = field->next;
+		}
+
+		xml_printf(&retval, tdesc, pos, size,
+				"</union>\n");
+
+	} else if (type->type_class == REG_TYPE_CLASS_STRUCT) {
+		struct reg_data_type_struct_field *field;
+		field = type->reg_type_struct->fields;
+
+		if (field->use_bitfields) {
+			/* <struct id="id" size="size">
+			 *  <field name="name" start="start" end="end"/> ...
+			 * </struct> */
+			xml_printf(&retval, tdesc, pos, size,
+					"<struct id=\"%s\" size=\"%d\">\n",
+					type->id, type->reg_type_struct->size);
+			while (field != NULL) {
+				xml_printf(&retval, tdesc, pos, size,
+						"<field name=\"%s\" start=\"%d\" end=\"%d\"/>\n",
+						field->name, field->bitfield->start,
+						field->bitfield->end);
+
+				field = field->next;
+			}
+		} else {
+			/* <struct id="id">
+			 *  <field name="name" type="type"/> ...
+			 * </struct> */
+			xml_printf(&retval, tdesc, pos, size,
+					"<struct id=\"%s\">\n",
+					type->id);
+			while (field != NULL) {
+				xml_printf(&retval, tdesc, pos, size,
+						"<field name=\"%s\" type=\"%s\"/>\n",
+						field->name, field->type->id);
+
+				field = field->next;
+			}
+		}
+
+		xml_printf(&retval, tdesc, pos, size,
+				"</struct>\n");
+
+	} else if (type->type_class == REG_TYPE_CLASS_FLAGS) {
+		/* <flags id="id" size="size">
+		 *  <field name="name" start="start" end="end"/> ...
+		 * </flags> */
+		xml_printf(&retval, tdesc, pos, size,
+				"<flags id=\"%s\" size=\"%d\">\n",
+				type->id, type->reg_type_flags->size);
+
+		struct reg_data_type_flags_field *field;
+		field = type->reg_type_flags->fields;
+		while (field != NULL) {
+			xml_printf(&retval, tdesc, pos, size,
+					"<field name=\"%s\" start=\"%d\" end=\"%d\"/>\n",
+					field->name, field->bitfield->start, field->bitfield->end);
+
+			field = field->next;
+		}
+
+		xml_printf(&retval, tdesc, pos, size,
+				"</flags>\n");
+
+	}
+
+	return ERROR_OK;
+}
+
+/* Get a list of available target registers features. feature_list must
+ * be freed by caller.
+ */
+static int get_reg_features_list(struct target *target, char const **feature_list[], int *feature_list_size,
+		struct reg **reg_list, int reg_list_size)
+{
+	int tbl_sz = 0;
+
+	/* Start with only one element */
+	*feature_list = calloc(1, sizeof(char *));
+
+	for (int i = 0; i < reg_list_size; i++) {
+		if (reg_list[i]->exist == false)
+			continue;
+
+		if (reg_list[i]->feature != NULL
+			&& reg_list[i]->feature->name != NULL
+			&& (strcmp(reg_list[i]->feature->name, ""))) {
+			/* We found a feature, check if the feature is already in the
+			 * table. If not, allocate a new entry for the table and
+			 * put the new feature in it.
+			 */
+			for (int j = 0; j < (tbl_sz + 1); j++) {
+				if (!((*feature_list)[j])) {
+					(*feature_list)[tbl_sz++] = reg_list[i]->feature->name;
+					*feature_list = realloc(*feature_list, sizeof(char *) * (tbl_sz + 1));
+					(*feature_list)[tbl_sz] = NULL;
+					break;
+				} else {
+					if (!strcmp((*feature_list)[j], reg_list[i]->feature->name))
+						break;
+				}
+			}
+		}
+	}
+
+	if (feature_list_size)
+		*feature_list_size = tbl_sz;
+
+	return ERROR_OK;
+}
+
+static int gdb_generate_target_description(struct target *target, char **tdesc_out)
+{
+	int retval = ERROR_OK;
+	struct reg **reg_list = NULL;
+	int reg_list_size;
+	char const **features = NULL;
+	int feature_list_size = 0;
+	char *tdesc = NULL;
+	int pos = 0;
+	int size = 0;
+
+	retval = target_get_gdb_reg_list(target, &reg_list,
+			&reg_list_size, REG_CLASS_ALL);
+
+	if (retval != ERROR_OK) {
+		LOG_ERROR("get register list failed");
+		retval = ERROR_FAIL;
+		goto error;
+	}
+
+	if (reg_list_size <= 0) {
+		LOG_ERROR("get register list failed");
+		retval = ERROR_FAIL;
+		goto error;
+	}
+
+	/* Get a list of available target registers features */
+	retval = get_reg_features_list(target, &features, &feature_list_size, reg_list, reg_list_size);
+	if (retval != ERROR_OK) {
+		LOG_ERROR("Can't get the registers feature list");
+		retval = ERROR_FAIL;
+		goto error;
+	}
+
+	/* If we found some features associated with registers, create sections */
+	int current_feature = 0;
+
+	xml_printf(&retval, &tdesc, &pos, &size,
+			"<?xml version=\"1.0\"?>\n"
+			"<!DOCTYPE target SYSTEM \"gdb-target.dtd\">\n"
+			"<target version=\"1.0\">\n");
+
+	/* generate target description according to register list */
+	if (features != NULL) {
+		while (features[current_feature]) {
+
+			xml_printf(&retval, &tdesc, &pos, &size,
+					"<feature name=\"%s\">\n",
+					features[current_feature]);
+
+			int i;
+			for (i = 0; i < reg_list_size; i++) {
+
+				if (reg_list[i]->exist == false)
+					continue;
+
+				if (strcmp(reg_list[i]->feature->name, features[current_feature]))
+					continue;
+
+				const char *type_str;
+				if (reg_list[i]->reg_data_type != NULL) {
+					if (reg_list[i]->reg_data_type->type == REG_TYPE_ARCH_DEFINED) {
+						/* generate <type... first, if there are architecture-defined types. */
+						gdb_generate_reg_type_description(target, &tdesc, &pos, &size,
+								reg_list[i]->reg_data_type);
+
+						type_str = reg_list[i]->reg_data_type->id;
+					} else {
+						/* predefined type */
+						type_str = gdb_get_reg_type_name(
+								reg_list[i]->reg_data_type->type);
+					}
+				} else {
+					/* Default type is "int" */
+					type_str = "int";
+				}
+
+				xml_printf(&retval, &tdesc, &pos, &size,
+						"<reg name=\"%s\"", reg_list[i]->name);
+				xml_printf(&retval, &tdesc, &pos, &size,
+						" bitsize=\"%d\"", reg_list[i]->size);
+				xml_printf(&retval, &tdesc, &pos, &size,
+						" regnum=\"%d\"", reg_list[i]->number);
+				if (reg_list[i]->caller_save)
+					xml_printf(&retval, &tdesc, &pos, &size,
+							" save-restore=\"yes\"");
+				else
+					xml_printf(&retval, &tdesc, &pos, &size,
+							" save-restore=\"no\"");
+
+				xml_printf(&retval, &tdesc, &pos, &size,
+						" type=\"%s\"", type_str);
+
+				if (reg_list[i]->group != NULL)
+					xml_printf(&retval, &tdesc, &pos, &size,
+							" group=\"%s\"", reg_list[i]->group);
+
+				xml_printf(&retval, &tdesc, &pos, &size,
+						"/>\n");
+			}
+
+			xml_printf(&retval, &tdesc, &pos, &size,
+					"</feature>\n");
+
+			current_feature++;
+		}
+	}
+
+	xml_printf(&retval, &tdesc, &pos, &size,
+			"</target>\n");
+
+error:
+	free(features);
+	free(reg_list);
+
+	if (retval == ERROR_OK)
+		*tdesc_out = tdesc;
+	else
+		free(tdesc);
+
+	return retval;
+}
+
+static int gdb_get_target_description_chunk(struct target *target, struct target_desc_format *target_desc,
+		char **chunk, int32_t offset, uint32_t length)
+{
+	if (target_desc == NULL) {
+		LOG_ERROR("Unable to Generate Target Description");
+		return ERROR_FAIL;
+	}
+
+	char *tdesc = target_desc->tdesc;
+	uint32_t tdesc_length = target_desc->tdesc_length;
+
+	if (tdesc == NULL) {
+		int retval = gdb_generate_target_description(target, &tdesc);
+		if (retval != ERROR_OK) {
+			LOG_ERROR("Unable to Generate Target Description");
+			return ERROR_FAIL;
+		}
+
+		tdesc_length = strlen(tdesc);
+	}
+
+	char transfer_type;
+
+	if (length < (tdesc_length - offset))
+		transfer_type = 'm';
+	else
+		transfer_type = 'l';
+
+	*chunk = malloc(length + 2);
+	if (*chunk == NULL) {
+		LOG_ERROR("Unable to allocate memory");
+		return ERROR_FAIL;
+	}
+
+	(*chunk)[0] = transfer_type;
+	if (transfer_type == 'm') {
+		strncpy((*chunk) + 1, tdesc + offset, length);
+		(*chunk)[1 + length] = '\0';
+	} else {
+		strncpy((*chunk) + 1, tdesc + offset, tdesc_length - offset);
+		(*chunk)[1 + (tdesc_length - offset)] = '\0';
+
+		/* After gdb-server sends out last chunk, invalidate tdesc. */
+		free(tdesc);
+		tdesc = NULL;
+		tdesc_length = 0;
+	}
+
+	target_desc->tdesc = tdesc;
+	target_desc->tdesc_length = tdesc_length;
+
+	return ERROR_OK;
+}
+
+static int gdb_target_description_supported(struct target *target, int *supported)
+{
+	int retval = ERROR_OK;
+	struct reg **reg_list = NULL;
+	int reg_list_size = 0;
+	char const **features = NULL;
+	int feature_list_size = 0;
+
+	retval = target_get_gdb_reg_list(target, &reg_list,
+			&reg_list_size, REG_CLASS_ALL);
+	if (retval != ERROR_OK) {
+		LOG_ERROR("get register list failed");
+		goto error;
+	}
+
+	if (reg_list_size <= 0) {
+		LOG_ERROR("get register list failed");
+		retval = ERROR_FAIL;
+		goto error;
+	}
+
+	/* Get a list of available target registers features */
+	retval = get_reg_features_list(target, &features, &feature_list_size, reg_list, reg_list_size);
+	if (retval != ERROR_OK) {
+		LOG_ERROR("Can't get the registers feature list");
+		goto error;
+	}
+
+	if (supported) {
+		if (feature_list_size)
+			*supported = 1;
+		else
+			*supported = 0;
+	}
+
+error:
+	free(features);
+
+	free(reg_list);
+
+	return retval;
+}
+
 static int gdb_query_packet(struct connection *connection,
-		char *packet, int packet_size)
+		char const *packet, int packet_size)
 {
 	struct command_context *cmd_ctx = connection->cmd_ctx;
 	struct gdb_connection *gdb_connection = connection->priv;
@@ -1734,19 +2321,35 @@ static int gdb_query_packet(struct connection *connection,
 		}
 	} else if (strncmp(packet, "qSupported", 10) == 0) {
 		/* we currently support packet size and qXfer:memory-map:read (if enabled)
-		 * disable qXfer:features:read for the moment */
+		 * qXfer:features:read is supported for some targets */
 		int retval = ERROR_OK;
 		char *buffer = NULL;
 		int pos = 0;
 		int size = 0;
+		int gdb_target_desc_supported = 0;
+
+		/* we need to test that the target supports target descriptions */
+		retval = gdb_target_description_supported(target, &gdb_target_desc_supported);
+		if (retval != ERROR_OK) {
+			LOG_INFO("Failed detecting Target Description Support, disabling");
+			gdb_target_desc_supported = 0;
+		}
+
+		/* support may be disabled globally */
+		if (gdb_use_target_description == 0) {
+			if (gdb_target_desc_supported)
+				LOG_WARNING("Target Descriptions Supported, but disabled");
+			gdb_target_desc_supported = 0;
+		}
 
 		xml_printf(&retval,
 			&buffer,
 			&pos,
 			&size,
-			"PacketSize=%x;qXfer:memory-map:read%c;qXfer:features:read-;QStartNoAckMode+",
+			"PacketSize=%x;qXfer:memory-map:read%c;qXfer:features:read%c;QStartNoAckMode+",
 			(GDB_BUFFER_SIZE - 1),
-			((gdb_use_memory_map == 1) && (flash_get_bank_count() > 0)) ? '+' : '-');
+			((gdb_use_memory_map == 1) && (flash_get_bank_count() > 0)) ? '+' : '-',
+			(gdb_target_desc_supported == 1) ? '+' : '-');
 
 		if (retval != ERROR_OK) {
 			gdb_send_error(connection, 01);
@@ -1762,33 +2365,26 @@ static int gdb_query_packet(struct connection *connection,
 		return gdb_memory_map(connection, packet, packet_size);
 	else if (strncmp(packet, "qXfer:features:read:", 20) == 0) {
 		char *xml = NULL;
-		int size = 0;
-		int pos = 0;
 		int retval = ERROR_OK;
 
 		int offset;
 		unsigned int length;
-		char *annex;
 
 		/* skip command character */
 		packet += 20;
 
-		if (decode_xfer_read(packet, &annex, &offset, &length) < 0) {
+		if (decode_xfer_read(packet, NULL, &offset, &length) < 0) {
 			gdb_send_error(connection, 01);
 			return ERROR_OK;
 		}
 
-		if (strcmp(annex, "target.xml") != 0) {
-			gdb_send_error(connection, 01);
-			return ERROR_OK;
-		}
-
-		xml_printf(&retval,
-			&xml,
-			&pos,
-			&size, \
-			"l < target version=\"1.0\">\n < architecture > arm</architecture>\n</target>\n");
-
+		/* Target should prepare correct target description for annex.
+		 * The first character of returned xml is 'm' or 'l'. 'm' for
+		 * there are *more* chunks to transfer. 'l' for it is the *last*
+		 * chunk of target description.
+		 */
+		retval = gdb_get_target_description_chunk(target, &gdb_connection->target_desc,
+				&xml, offset, length);
 		if (retval != ERROR_OK) {
 			gdb_error(connection, retval);
 			return retval;
@@ -1809,7 +2405,7 @@ static int gdb_query_packet(struct connection *connection,
 }
 
 static int gdb_v_packet(struct connection *connection,
-		char *packet, int packet_size)
+		char const *packet, int packet_size)
 {
 	struct gdb_connection *gdb_connection = connection->priv;
 	struct gdb_service *gdb_service = connection->service->priv;
@@ -1826,20 +2422,20 @@ static int gdb_v_packet(struct connection *connection,
 		unsigned long addr;
 		unsigned long length;
 
-		char *parse = packet + 12;
+		char const *parse = packet + 12;
 		if (*parse == '\0') {
 			LOG_ERROR("incomplete vFlashErase packet received, dropping connection");
 			return ERROR_SERVER_REMOTE_CLOSED;
 		}
 
-		addr = strtoul(parse, &parse, 16);
+		addr = strtoul(parse, (char **)&parse, 16);
 
 		if (*(parse++) != ',' || *parse == '\0') {
 			LOG_ERROR("incomplete vFlashErase packet received, dropping connection");
 			return ERROR_SERVER_REMOTE_CLOSED;
 		}
 
-		length = strtoul(parse, &parse, 16);
+		length = strtoul(parse, (char **)&parse, 16);
 
 		if (*parse != '\0') {
 			LOG_ERROR("incomplete vFlashErase packet received, dropping connection");
@@ -1882,13 +2478,13 @@ static int gdb_v_packet(struct connection *connection,
 		int retval;
 		unsigned long addr;
 		unsigned long length;
-		char *parse = packet + 12;
+		char const *parse = packet + 12;
 
 		if (*parse == '\0') {
 			LOG_ERROR("incomplete vFlashErase packet received, dropping connection");
 			return ERROR_SERVER_REMOTE_CLOSED;
 		}
-		addr = strtoul(parse, &parse, 16);
+		addr = strtoul(parse, (char **)&parse, 16);
 		if (*(parse++) != ':') {
 			LOG_ERROR("incomplete vFlashErase packet received, dropping connection");
 			return ERROR_SERVER_REMOTE_CLOSED;
@@ -1903,7 +2499,7 @@ static int gdb_v_packet(struct connection *connection,
 
 		/* create new section with content from packet buffer */
 		retval = image_add_section(gdb_connection->vflash_image,
-				addr, length, 0x0, (uint8_t *)parse);
+				addr, length, 0x0, (uint8_t const *)parse);
 		if (retval != ERROR_OK)
 			return retval;
 
@@ -1951,6 +2547,54 @@ static int gdb_detach(struct connection *connection)
 	return gdb_put_packet(connection, "OK", 2);
 }
 
+/* The format of 'F' response packet is
+ * Fretcode,errno,Ctrl-C flag;call-specific attachment
+ */
+static int gdb_fileio_response_packet(struct connection *connection,
+		char const *packet, int packet_size)
+{
+	struct target *target = get_target_from_connection(connection);
+	char *separator;
+	char *parsing_point;
+	int fileio_retcode = strtoul(packet + 1, &separator, 16);
+	int fileio_errno = 0;
+	bool fileio_ctrl_c = false;
+	int retval;
+
+	LOG_DEBUG("-");
+
+	if (*separator == ',') {
+		parsing_point = separator + 1;
+		fileio_errno = strtoul(parsing_point, &separator, 16);
+		if (*separator == ',') {
+			if (*(separator + 1) == 'C') {
+				/* TODO: process ctrl-c */
+				fileio_ctrl_c = true;
+			}
+		}
+	}
+
+	LOG_DEBUG("File-I/O response, retcode: 0x%x, errno: 0x%x, ctrl-c: %s",
+			fileio_retcode, fileio_errno, fileio_ctrl_c ? "true" : "false");
+
+	retval = target_gdb_fileio_end(target, fileio_retcode, fileio_errno, fileio_ctrl_c);
+	if (retval != ERROR_OK)
+		return ERROR_FAIL;
+
+	/* After File-I/O ends, keep continue or step */
+	if (gdb_running_type == 'c')
+		retval = target_resume(target, 1, 0x0, 0, 0);
+	else if (gdb_running_type == 's')
+		retval = target_step(target, 1, 0x0, 0);
+	else
+		retval = ERROR_FAIL;
+
+	if (retval != ERROR_OK)
+		return ERROR_FAIL;
+
+	return ERROR_OK;
+}
+
 static void gdb_log_callback(void *priv, const char *file, unsigned line,
 		const char *function, const char *string)
 {
@@ -1979,7 +2623,7 @@ static int gdb_input_inner(struct connection *connection)
 
 	struct gdb_service *gdb_service = connection->service->priv;
 	struct target *target = gdb_service->target;
-	char *packet = gdb_packet_buffer;
+	char const *packet = gdb_packet_buffer;
 	int packet_size;
 	int retval;
 	struct gdb_connection *gdb_con = connection->priv;
@@ -1998,12 +2642,12 @@ static int gdb_input_inner(struct connection *connection)
 	 */
 	do {
 		packet_size = GDB_BUFFER_SIZE-1;
-		retval = gdb_get_packet(connection, packet, &packet_size);
+		retval = gdb_get_packet(connection, gdb_packet_buffer, &packet_size);
 		if (retval != ERROR_OK)
 			return retval;
 
 		/* terminate with zero */
-		packet[packet_size] = 0;
+		gdb_packet_buffer[packet_size] = '\0';
 
 		if (LOG_LEVEL_IS(LOG_LVL_DEBUG)) {
 			if (packet[0] == 'X') {
@@ -2177,6 +2821,19 @@ static int gdb_input_inner(struct connection *connection)
 					gdb_write_smp_packet(connection, packet, packet_size);
 					break;
 
+				case 'F':
+					/* File-I/O extension */
+					/* After gdb uses host-side syscall to complete target file
+					 * I/O, gdb sends host-side syscall return value to target
+					 * by 'F' packet.
+					 * The format of 'F' response packet is
+					 * Fretcode,errno,Ctrl-C flag;call-specific attachment
+					 */
+					gdb_con->frontend_state = TARGET_RUNNING;
+					log_add_callback(gdb_log_callback, connection);
+					gdb_fileio_response_packet(connection, packet, packet_size);
+					break;
+
 				default:
 					/* ignore unknown packets */
 					LOG_DEBUG("ignoring 0x%2.2x packet", packet[0]);
@@ -2268,7 +2925,7 @@ static int gdb_target_add_one(struct target *target)
 		portnumber = strtol(gdb_port_next, &end, 0);
 		if (!*end) {
 			if (parse_long(gdb_port_next, &portnumber) == ERROR_OK) {
-				free((void *)gdb_port_next);
+				free(gdb_port_next);
 				gdb_port_next = alloc_printf("%d", portnumber+1);
 			}
 		}
@@ -2315,7 +2972,7 @@ COMMAND_HANDLER(handle_gdb_port_command)
 {
 	int retval = CALL_COMMAND_HANDLER(server_pipe_command, &gdb_port);
 	if (ERROR_OK == retval) {
-		free((void *)gdb_port_next);
+		free(gdb_port_next);
 		gdb_port_next = strdup(gdb_port);
 	}
 	return retval;
@@ -2372,6 +3029,59 @@ COMMAND_HANDLER(handle_gdb_breakpoint_override_command)
 	return ERROR_OK;
 }
 
+COMMAND_HANDLER(handle_gdb_target_description_command)
+{
+	if (CMD_ARGC != 1)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+
+	COMMAND_PARSE_ENABLE(CMD_ARGV[0], gdb_use_target_description);
+	return ERROR_OK;
+}
+
+COMMAND_HANDLER(handle_gdb_save_tdesc_command)
+{
+	char *tdesc;
+	uint32_t tdesc_length;
+	struct target *target = get_current_target(CMD_CTX);
+
+	int retval = gdb_generate_target_description(target, &tdesc);
+	if (retval != ERROR_OK) {
+		LOG_ERROR("Unable to Generate Target Description");
+		return ERROR_FAIL;
+	}
+
+	tdesc_length = strlen(tdesc);
+
+	struct fileio fileio;
+	size_t size_written;
+
+	char *tdesc_filename = alloc_printf("%s.xml", target_type_name(target));
+	if (tdesc_filename == NULL) {
+		retval = ERROR_FAIL;
+		goto out;
+	}
+
+	retval = fileio_open(&fileio, tdesc_filename, FILEIO_WRITE, FILEIO_TEXT);
+
+	if (retval != ERROR_OK) {
+		LOG_ERROR("Can't open %s for writing", tdesc_filename);
+		goto out;
+	}
+
+	retval = fileio_write(&fileio, tdesc_length, tdesc, &size_written);
+
+	fileio_close(&fileio);
+
+	if (retval != ERROR_OK)
+		LOG_ERROR("Error while writing the tdesc file");
+
+out:
+	free(tdesc_filename);
+	free(tdesc);
+
+	return retval;
+}
+
 static const struct command_registration gdb_command_handlers[] = {
 	{
 		.name = "gdb_sync",
@@ -2423,6 +3133,19 @@ static const struct command_registration gdb_command_handlers[] = {
 		.help = "Display or specify type of breakpoint "
 			"to be used by gdb 'break' commands.",
 		.usage = "('hard'|'soft'|'disable')"
+	},
+	{
+		.name = "gdb_target_description",
+		.handler = handle_gdb_target_description_command,
+		.mode = COMMAND_CONFIG,
+		.help = "enable or disable target description",
+		.usage = "('enable'|'disable')"
+	},
+	{
+		.name = "gdb_save_tdesc",
+		.handler = handle_gdb_save_tdesc_command,
+		.mode = COMMAND_EXEC,
+		.help = "Save the target description file",
 	},
 	COMMAND_REGISTRATION_DONE
 };

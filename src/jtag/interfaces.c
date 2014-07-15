@@ -62,8 +62,11 @@ extern struct jtag_interface ft2232_interface;
 #if BUILD_FTDI == 1
 extern struct jtag_interface ftdi_interface;
 #endif
-#if BUILD_USB_BLASTER_LIBFTDI == 1 || BUILD_USB_BLASTER_FTD2XX == 1
+#if BUILD_USB_BLASTER_LIBFTDI == 1 || BUILD_USB_BLASTER_FTD2XX == 1 || BUILD_USB_BLASTER_2 == 1
 extern struct jtag_interface usb_blaster_interface;
+#endif
+#if BUILD_JTAG_VPI == 1
+extern struct jtag_interface jtag_vpi_interface;
 #endif
 #if BUILD_AMTJTAGACCEL == 1
 extern struct jtag_interface amt_jtagaccel_interface;
@@ -125,6 +128,9 @@ extern struct jtag_interface aice_interface;
 #if BUILD_BCM2835GPIO == 1
 extern struct jtag_interface bcm2835gpio_interface;
 #endif
+#if BUILD_CMSIS_DAP == 1
+extern struct jtag_interface cmsis_dap_interface;
+#endif
 #endif /* standard drivers */
 
 /**
@@ -155,8 +161,11 @@ struct jtag_interface *jtag_interfaces[] = {
 #if BUILD_FTDI == 1
 		&ftdi_interface,
 #endif
-#if BUILD_USB_BLASTER_LIBFTDI == 1 || BUILD_USB_BLASTER_FTD2XX == 1
+#if BUILD_USB_BLASTER_LIBFTDI == 1 || BUILD_USB_BLASTER_FTD2XX == 1 || BUILD_USB_BLASTER_2 == 1
 		&usb_blaster_interface,
+#endif
+#if BUILD_JTAG_VPI == 1
+		&jtag_vpi_interface,
 #endif
 #if BUILD_AMTJTAGACCEL == 1
 		&amt_jtagaccel_interface,
@@ -217,6 +226,9 @@ struct jtag_interface *jtag_interfaces[] = {
 #endif
 #if BUILD_BCM2835GPIO == 1
 		&bcm2835gpio_interface,
+#endif
+#if BUILD_CMSIS_DAP == 1
+		&cmsis_dap_interface,
 #endif
 #endif /* standard drivers */
 		NULL,

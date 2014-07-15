@@ -120,7 +120,7 @@ struct stmsmi_flash_bank {
 	int probed;
 	uint32_t io_base;
 	uint32_t bank_num;
-	struct flash_device *dev;
+	const struct flash_device *dev;
 };
 
 struct stmsmi_target {
@@ -130,7 +130,7 @@ struct stmsmi_target {
 	uint32_t io_base;
 };
 
-static struct stmsmi_target target_devices[] = {
+static const struct stmsmi_target target_devices[] = {
 	/* name,          tap_idcode, smi_base,   io_base */
 	{ "SPEAr3xx/6xx", 0x07926041, 0xf8000000, 0xfc000000 },
 	{ "STR75x",       0x4f1f0041, 0x80000000, 0x90000000 },
@@ -372,7 +372,7 @@ static int stmsmi_protect(struct flash_bank *bank, int set,
 	return ERROR_OK;
 }
 
-static int smi_write_buffer(struct flash_bank *bank, uint8_t *buffer,
+static int smi_write_buffer(struct flash_bank *bank, const uint8_t *buffer,
 	uint32_t address, uint32_t len)
 {
 	struct target *target = bank->target;
@@ -397,7 +397,7 @@ static int smi_write_buffer(struct flash_bank *bank, uint8_t *buffer,
 	return ERROR_OK;
 }
 
-static int stmsmi_write(struct flash_bank *bank, uint8_t *buffer,
+static int stmsmi_write(struct flash_bank *bank, const uint8_t *buffer,
 	uint32_t offset, uint32_t count)
 {
 	struct target *target = bank->target;
@@ -529,7 +529,7 @@ static int stmsmi_probe(struct flash_bank *bank)
 	uint32_t io_base;
 	struct flash_sector *sectors;
 	uint32_t id = 0; /* silence uninitialized warning */
-	struct stmsmi_target *target_device;
+	const struct stmsmi_target *target_device;
 	int retval;
 
 	if (stmsmi_info->probed)
@@ -575,7 +575,7 @@ static int stmsmi_probe(struct flash_bank *bank)
 		return retval;
 
 	stmsmi_info->dev = NULL;
-	for (struct flash_device *p = flash_devices; p->name ; p++)
+	for (const struct flash_device *p = flash_devices; p->name ; p++)
 		if (p->device_id == id) {
 			stmsmi_info->dev = p;
 			break;
@@ -638,7 +638,7 @@ static int get_stmsmi_info(struct flash_bank *bank, char *buf, int buf_size)
 	}
 
 	snprintf(buf, buf_size, "\nSMI flash information:\n"
-		"  Device \'%s\' (ID 0x%08x)\n",
+		"  Device \'%s\' (ID 0x%08" PRIx32 ")\n",
 		stmsmi_info->dev->name, stmsmi_info->dev->device_id);
 
 	return ERROR_OK;

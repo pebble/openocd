@@ -110,6 +110,17 @@ typedef bool _Bool;
  * Again, note that the "buf" pointer in memory is probably unaligned.
  */
 
+static inline uint64_t le_to_h_u64(const uint8_t *buf)
+{
+	return (uint64_t)((uint64_t)buf[0] |
+			  (uint64_t)buf[1] << 8 |
+			  (uint64_t)buf[2] << 16 |
+			  (uint64_t)buf[3] << 24 |
+			  (uint64_t)buf[4] << 32 |
+			  (uint64_t)buf[5] << 40 |
+			  (uint64_t)buf[6] << 48 |
+			  (uint64_t)buf[7] << 56);
+}
 
 static inline uint32_t le_to_h_u32(const uint8_t* buf)
 {
@@ -126,6 +137,18 @@ static inline uint16_t le_to_h_u16(const uint8_t* buf)
 	return (uint16_t)(buf[0] | buf[1] << 8);
 }
 
+static inline uint64_t be_to_h_u64(const uint8_t *buf)
+{
+	return (uint64_t)((uint64_t)buf[7] |
+			  (uint64_t)buf[6] << 8 |
+			  (uint64_t)buf[5] << 16 |
+			  (uint64_t)buf[4] << 24 |
+			  (uint64_t)buf[3] << 32 |
+			  (uint64_t)buf[2] << 40 |
+			  (uint64_t)buf[1] << 48 |
+			  (uint64_t)buf[0] << 56);
+}
+
 static inline uint32_t be_to_h_u32(const uint8_t* buf)
 {
 	return (uint32_t)(buf[3] | buf[2] << 8 | buf[1] << 16 | buf[0] << 24);
@@ -139,6 +162,30 @@ static inline uint32_t be_to_h_u24(const uint8_t* buf)
 static inline uint16_t be_to_h_u16(const uint8_t* buf)
 {
 	return (uint16_t)(buf[1] | buf[0] << 8);
+}
+
+static inline void h_u64_to_le(uint8_t *buf, int64_t val)
+{
+	buf[7] = (uint8_t) (val >> 56);
+	buf[6] = (uint8_t) (val >> 48);
+	buf[5] = (uint8_t) (val >> 40);
+	buf[4] = (uint8_t) (val >> 32);
+	buf[3] = (uint8_t) (val >> 24);
+	buf[2] = (uint8_t) (val >> 16);
+	buf[1] = (uint8_t) (val >> 8);
+	buf[0] = (uint8_t) (val >> 0);
+}
+
+static inline void h_u64_to_be(uint8_t *buf, int64_t val)
+{
+	buf[0] = (uint8_t) (val >> 56);
+	buf[1] = (uint8_t) (val >> 48);
+	buf[2] = (uint8_t) (val >> 40);
+	buf[3] = (uint8_t) (val >> 32);
+	buf[4] = (uint8_t) (val >> 24);
+	buf[5] = (uint8_t) (val >> 16);
+	buf[6] = (uint8_t) (val >> 8);
+	buf[7] = (uint8_t) (val >> 0);
 }
 
 static inline void h_u32_to_le(uint8_t* buf, int val)
@@ -181,6 +228,65 @@ static inline void h_u16_to_be(uint8_t* buf, int val)
 {
 	buf[0] = (uint8_t) (val >> 8);
 	buf[1] = (uint8_t) (val >> 0);
+}
+
+/**
+ * Byte-swap buffer 16-bit.
+ *
+ * Len must be even, dst and src must be either the same or non-overlapping.
+ *
+ * @param dst Destination buffer.
+ * @param src Source buffer.
+ * @param len Length of source (and destination) buffer, in bytes.
+ */
+static inline void buf_bswap16(uint8_t *dst, const uint8_t *src, size_t len)
+{
+	assert(len % 2 == 0);
+	assert(dst == src || dst + len <= src || src + len <= dst);
+
+	for (size_t n = 0; n < len; n += 2) {
+		uint16_t x = be_to_h_u16(src + n);
+		h_u16_to_le(dst + n, x);
+	}
+}
+
+/**
+ * Byte-swap buffer 32-bit.
+ *
+ * Len must be divisible by four, dst and src must be either the same or non-overlapping.
+ *
+ * @param dst Destination buffer.
+ * @param src Source buffer.
+ * @param len Length of source (and destination) buffer, in bytes.
+ */
+static inline void buf_bswap32(uint8_t *dst, const uint8_t *src, size_t len)
+{
+	assert(len % 4 == 0);
+	assert(dst == src || dst + len <= src || src + len <= dst);
+
+	for (size_t n = 0; n < len; n += 4) {
+		uint32_t x = be_to_h_u32(src + n);
+		h_u32_to_le(dst + n, x);
+	}
+}
+
+/**
+ * Calculate the (even) parity of a 32-bit datum.
+ * @param x The datum.
+ * @return 1 if the number of set bits in x is odd, 0 if it is even.
+ */
+static inline int parity_u32(uint32_t x)
+{
+#ifdef __GNUC__
+	return __builtin_parityl(x);
+#else
+	x ^= x >> 16;
+	x ^= x >> 8;
+	x ^= x >> 4;
+	x ^= x >> 2;
+	x ^= x >> 1;
+	return x & 1;
+#endif
 }
 
 #if defined(__ECOS)

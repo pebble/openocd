@@ -10,7 +10,10 @@
  *                                                                         *
  *   Copyright (C) 2013 by Roman Dmitrienko                                *
  *   me@iamroman.org                                                       *
- *
+ *                                                                         *
+ *   Copyright (C) 2014 Nemui Trinomius                                    *
+ *   nemuisan_kawausogasuki@live.jp                                        *
+ *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
  *   the Free Software Foundation; either version 2 of the License, or     *
@@ -42,6 +45,8 @@
 #define EFM_FAMILY_ID_GIANT_GECKO       72
 #define EFM_FAMILY_ID_TINY_GECKO        73
 #define EFM_FAMILY_ID_LEOPARD_GECKO     74
+#define EFM_FAMILY_ID_WONDER_GECKO      75
+#define EFM_FAMILY_ID_ZERO_GECKO        76
 
 #define EFM32_FLASH_ERASE_TMO           100
 #define EFM32_FLASH_WDATAREADY_TMO      100
@@ -97,7 +102,7 @@ struct efm32_info {
 	uint16_t page_size;
 };
 
-static int efm32x_write(struct flash_bank *bank, uint8_t *buffer,
+static int efm32x_write(struct flash_bank *bank, const uint8_t *buffer,
 	uint32_t offset, uint32_t count);
 
 static int efm32x_get_flash_size(struct flash_bank *bank, uint16_t *flash_sz)
@@ -139,8 +144,12 @@ static int efm32x_read_info(struct flash_bank *bank,
 
 	if (((cpuid >> 4) & 0xfff) == 0xc23) {
 		/* Cortex M3 device */
+	} else if (((cpuid >> 4) & 0xfff) == 0xc24) {
+		/* Cortex M4 device(WONDER GECKO) */
+	} else if (((cpuid >> 4) & 0xfff) == 0xc60) {
+		/* Cortex M0plus device(ZERO GECKO) */
 	} else {
-		LOG_ERROR("Target is not CortexM3");
+		LOG_ERROR("Target is not Cortex-Mx Device");
 		return ERROR_FAIL;
 	}
 
@@ -167,6 +176,8 @@ static int efm32x_read_info(struct flash_bank *bank,
 	if (EFM_FAMILY_ID_GECKO == efm32_info->part_family ||
 			EFM_FAMILY_ID_TINY_GECKO == efm32_info->part_family)
 		efm32_info->page_size = 512;
+	else if (EFM_FAMILY_ID_ZERO_GECKO == efm32_info->part_family)
+		efm32_info->page_size = 1024;
 	else if (EFM_FAMILY_ID_GIANT_GECKO == efm32_info->part_family ||
 			EFM_FAMILY_ID_LEOPARD_GECKO == efm32_info->part_family) {
 		if (efm32_info->prod_rev >= 18) {
@@ -188,6 +199,18 @@ static int efm32x_read_info(struct flash_bank *bank,
 
 		if ((2048 != efm32_info->page_size) &&
 				(4096 != efm32_info->page_size)) {
+			LOG_ERROR("Invalid page size %u", efm32_info->page_size);
+			return ERROR_FAIL;
+		}
+	} else if (EFM_FAMILY_ID_WONDER_GECKO == efm32_info->part_family) {
+		uint8_t pg_size = 0;
+		ret = target_read_u8(bank->target, EFM32_MSC_DI_PAGE_SIZE,
+			&pg_size);
+		if (ERROR_OK != ret)
+			return ret;
+
+		efm32_info->page_size = (1 << ((pg_size+10) & 0xff));
+		if (2048 != efm32_info->page_size) {
 			LOG_ERROR("Invalid page size %u", efm32_info->page_size);
 			return ERROR_FAIL;
 		}
@@ -292,7 +315,7 @@ static int efm32x_erase_page(struct flash_bank *bank, uint32_t addr)
 	int ret = 0;
 	uint32_t status = 0;
 
-	LOG_DEBUG("erasing flash page at 0x%08x", addr);
+	LOG_DEBUG("erasing flash page at 0x%08" PRIx32, addr);
 
 	ret = target_write_u32(bank->target, EFM32_MSC_ADDRB, addr);
 	if (ERROR_OK != ret)
@@ -307,13 +330,13 @@ static int efm32x_erase_page(struct flash_bank *bank, uint32_t addr)
 	if (ERROR_OK != ret)
 		return ret;
 
-	LOG_DEBUG("status 0x%x", status);
+	LOG_DEBUG("status 0x%" PRIx32, status);
 
 	if (status & EFM32_MSC_STATUS_LOCKED_MASK) {
 		LOG_ERROR("Page is locked");
 		return ERROR_FAIL;
 	} else if (status & EFM32_MSC_STATUS_INVADDR_MASK) {
-		LOG_ERROR("Invalid address 0x%x", addr);
+		LOG_ERROR("Invalid address 0x%" PRIx32, addr);
 		return ERROR_FAIL;
 	}
 
@@ -484,7 +507,7 @@ static int efm32x_protect(struct flash_bank *bank, int set, int first, int last)
 	return ERROR_OK;
 }
 
-static int efm32x_write_block(struct flash_bank *bank, uint8_t *buf,
+static int efm32x_write_block(struct flash_bank *bank, const uint8_t *buf,
 	uint32_t offset, uint32_t count)
 {
 	struct target *target = bank->target;
@@ -578,8 +601,7 @@ static int efm32x_write_block(struct flash_bank *bank, uint8_t *buf,
 	};
 
 	ret = target_write_buffer(target, write_algorithm->address,
-		sizeof(efm32x_flash_write_code),
-		(uint8_t *)efm32x_flash_write_code);
+			sizeof(efm32x_flash_write_code), efm32x_flash_write_code);
 	if (ret != ERROR_OK)
 		return ret;
 
@@ -681,13 +703,13 @@ static int efm32x_write_word(struct flash_bank *bank, uint32_t addr,
 	if (ERROR_OK != ret)
 		return ret;
 
-	LOG_DEBUG("status 0x%x", status);
+	LOG_DEBUG("status 0x%" PRIx32, status);
 
 	if (status & EFM32_MSC_STATUS_LOCKED_MASK) {
 		LOG_ERROR("Page is locked");
 		return ERROR_FAIL;
 	} else if (status & EFM32_MSC_STATUS_INVADDR_MASK) {
-		LOG_ERROR("Invalid address 0x%x", addr);
+		LOG_ERROR("Invalid address 0x%" PRIx32, addr);
 		return ERROR_FAIL;
 	}
 
@@ -721,7 +743,7 @@ static int efm32x_write_word(struct flash_bank *bank, uint32_t addr,
 	return ERROR_OK;
 }
 
-static int efm32x_write(struct flash_bank *bank, uint8_t *buffer,
+static int efm32x_write(struct flash_bank *bank, const uint8_t *buffer,
 		uint32_t offset, uint32_t count)
 {
 	struct target *target = bank->target;
@@ -747,9 +769,9 @@ static int efm32x_write(struct flash_bank *bank, uint8_t *buffer,
 				"for padding buffer");
 			return ERROR_FAIL;
 		}
-		LOG_INFO("odd number of bytes to write (%d), extending to %d "
+		LOG_INFO("odd number of bytes to write (%" PRIu32 "), extending to %" PRIu32 " "
 			"and padding with 0xff", old_count, count);
-		memset(buffer, 0xff, count);
+		memset(new_buffer, 0xff, count);
 		buffer = memcpy(new_buffer, buffer, old_count);
 	}
 
@@ -825,6 +847,12 @@ static int efm32x_probe(struct flash_bank *bank)
 			break;
 		case EFM_FAMILY_ID_LEOPARD_GECKO:
 			LOG_INFO("Leopard Gecko MCU detected");
+			break;
+		case EFM_FAMILY_ID_WONDER_GECKO:
+			LOG_INFO("Wonder Gecko MCU detected");
+			break;
+		case EFM_FAMILY_ID_ZERO_GECKO:
+			LOG_INFO("Zero Gecko MCU detected");
 			break;
 		default:
 			LOG_ERROR("Unsupported MCU family %d",
@@ -935,6 +963,12 @@ static int get_efm32x_info(struct flash_bank *bank, char *buf, int buf_size)
 			break;
 		case EFM_FAMILY_ID_LEOPARD_GECKO:
 			printed = snprintf(buf, buf_size, "Leopard Gecko");
+			break;
+		case EFM_FAMILY_ID_WONDER_GECKO:
+			printed = snprintf(buf, buf_size, "Wonder Gecko");
+			break;
+		case EFM_FAMILY_ID_ZERO_GECKO:
+			printed = snprintf(buf, buf_size, "Zero Gecko");
 			break;
 	}
 

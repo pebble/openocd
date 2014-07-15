@@ -148,7 +148,7 @@ void *buf_set_buf(const void *_src, unsigned src_start,
 	if ((sq == 0) && (dq == 0) &&  (lq == 0)) {
 		for (i = 0; i < lb; i++)
 			*dst++ = *src++;
-		return (uint8_t *)_dst;
+		return _dst;
 	}
 
 	/* fallback to slow bit copy */
@@ -167,7 +167,7 @@ void *buf_set_buf(const void *_src, unsigned src_start,
 		}
 	}
 
-	return (uint8_t *)_dst;
+	return _dst;
 }
 
 uint32_t flip_u32(uint32_t value, unsigned int num)
@@ -396,4 +396,25 @@ int hexify(char *hex, const char *bin, int count, int out_maxlen)
 		cmd_len += snprintf(hex + cmd_len, out_maxlen - cmd_len, "%02x", bin[i] & 0xff);
 
 	return cmd_len;
+}
+
+void buffer_shr(void *_buf, unsigned buf_len, unsigned count)
+{
+	unsigned i;
+	unsigned char *buf = _buf;
+	unsigned bytes_to_remove;
+	unsigned shift;
+
+	bytes_to_remove = count / 8;
+	shift = count - (bytes_to_remove * 8);
+
+	for (i = 0; i < (buf_len - 1); i++)
+		buf[i] = (buf[i] >> shift) | ((buf[i+1] << (8 - shift)) & 0xff);
+
+	buf[(buf_len - 1)] = buf[(buf_len - 1)] >> shift;
+
+	if (bytes_to_remove) {
+		memmove(buf, &buf[bytes_to_remove], buf_len - bytes_to_remove);
+		memset(&buf[buf_len - bytes_to_remove], 0, bytes_to_remove);
+	}
 }

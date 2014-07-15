@@ -25,6 +25,7 @@
 #include <jim.h>
 
 #include "target.h"
+#include "breakpoints.h"
 #include "target_type.h"
 #include "algorithm.h"
 #include "register.h"
@@ -93,6 +94,29 @@
 #define ASM_REG_W_AAR1  0xFFFFF8
 #define ASM_REG_W_AAR2  0xFFFFF7
 #define ASM_REG_W_AAR3  0xFFFFF6
+
+/*
+ * OBCR Register bit definitions
+ */
+#define OBCR_b0_and_b1            ((0x0) << 10)
+#define OBCR_b0_or_b1             ((0x1) << 10)
+#define OBCR_b1_after_b0          ((0x2) << 10)
+#define OBCR_b0_after_b1          ((0x3) << 10)
+
+#define OBCR_BP_DISABLED          (0x0)
+#define OBCR_BP_MEM_P             (0x1)
+#define OBCR_BP_MEM_X             (0x2)
+#define OBCR_BP_MEM_Y             (0x3)
+#define OBCR_BP_ON_READ           ((0x2) << 0)
+#define OBCR_BP_ON_WRITE          ((0x1) << 0)
+#define OBCR_BP_CC_NOT_EQUAL      ((0x0) << 2)
+#define OBCR_BP_CC_EQUAL          ((0x1) << 2)
+#define OBCR_BP_CC_LESS_THAN      ((0x2) << 2)
+#define OBCR_BP_CC_GREATER_THAN   ((0x3) << 2)
+
+#define OBCR_BP_0(x)              ((x)<<2)
+#define OBCR_BP_1(x)              ((x)<<6)
+
 
 enum once_reg_idx {
 	ONCE_REG_IDX_OSCR = 0,
@@ -290,6 +314,13 @@ enum memory_type {
 	MEM_L = 3,
 };
 
+enum watchpoint_condition {
+	EQUAL,
+	NOT_EQUAL,
+	GREATER,
+	LESS_THAN
+};
+
 #define INSTR_JUMP      0x0AF080
 /* Effective Addressing Mode Encoding */
 #define EAME_R0         0x10
@@ -323,7 +354,8 @@ static uint8_t gdb_reg_list_idx[] = {
 
 static int dsp563xx_get_gdb_reg_list(struct target *target,
 	struct reg **reg_list[],
-	int *reg_list_size)
+	int *reg_list_size,
+	enum target_register_class reg_class)
 {
 	int i;
 	struct dsp563xx_common *dsp563xx = target_to_dsp563xx(target);
@@ -419,7 +451,7 @@ static void dsp563xx_build_reg_cache(struct target *target)
 
 	struct reg_cache **cache_p = register_get_last_cache_p(&target->reg_cache);
 	struct reg_cache *cache = malloc(sizeof(struct reg_cache));
-	struct reg *reg_list = malloc(sizeof(struct reg) * DSP563XX_NUMCOREREGS);
+	struct reg *reg_list = calloc(DSP563XX_NUMCOREREGS, sizeof(struct reg));
 	struct dsp563xx_core_reg *arch_info = malloc(
 			sizeof(struct dsp563xx_core_reg) * DSP563XX_NUMCOREREGS);
 	int i;
@@ -548,7 +580,7 @@ static int dsp563xx_reg_pc_read(struct target *target)
 	/* conditional branch check */
 	if (once_regs[ONCE_REG_IDX_OPABDR].reg == once_regs[ONCE_REG_IDX_OPABEX].reg) {
 		if ((once_regs[ONCE_REG_IDX_OPABF11].reg & 1) == 0) {
-			LOG_DEBUG("%s conditional branch not supported yet (0x%x 0x%x 0x%x)",
+			LOG_DEBUG("%s conditional branch not supported yet (0x%" PRIx32 " 0x%" PRIx32 " 0x%" PRIx32 ")",
 				__func__,
 				(once_regs[ONCE_REG_IDX_OPABF11].reg >> 1),
 				once_regs[ONCE_REG_IDX_OPABDR].reg,
@@ -880,6 +912,10 @@ static int dsp563xx_init_target(struct command_context *cmd_ctx, struct target *
 	LOG_DEBUG("%s", __func__);
 
 	dsp563xx_build_reg_cache(target);
+	struct dsp563xx_common *dsp563xx = target_to_dsp563xx(target);
+
+	dsp563xx->hardware_breakpoints_cleared = 0;
+	dsp563xx->hardware_breakpoint[0].used = BPU_NONE;
 
 	return ERROR_OK;
 }
@@ -902,7 +938,10 @@ static int dsp563xx_examine(struct target *target)
 		if (((chip>>5)&0x1f) == 0)
 			chip += 300;
 
-		LOG_INFO("DSP56%03d device found", chip);
+		LOG_INFO("DSP56%03" PRId32 " device found", chip);
+
+		/* Clear all breakpoints */
+		dsp563xx_once_reg_write(target->tap, 1, DSP563XX_ONCE_OBCR, 0);
 	}
 
 	return ERROR_OK;
@@ -1040,9 +1079,16 @@ static int dsp563xx_poll(struct target *target)
 			else
 				target_call_event_callbacks(target, TARGET_EVENT_HALTED);
 
-			LOG_DEBUG("target->state: %s (%x)", target_state_name(target), once_status);
-			LOG_INFO("halted: PC: 0x%x", dsp563xx->core_regs[DSP563XX_REG_IDX_PC]);
+			LOG_DEBUG("target->state: %s (%" PRIx32 ")", target_state_name(target), once_status);
+			LOG_INFO("halted: PC: 0x%" PRIx32, dsp563xx->core_regs[DSP563XX_REG_IDX_PC]);
 		}
+	}
+
+	if (!dsp563xx->hardware_breakpoints_cleared) {
+		err = dsp563xx_once_reg_write(target->tap, 1, DSP563XX_ONCE_OBCR, 0);
+		err = dsp563xx_once_reg_write(target->tap, 1, DSP563XX_ONCE_OMLR0, 0);
+		err = dsp563xx_once_reg_write(target->tap, 1, DSP563XX_ONCE_OMLR1, 0);
+		dsp563xx->hardware_breakpoints_cleared = 1;
 	}
 
 	return ERROR_OK;
@@ -1264,7 +1310,7 @@ static int dsp563xx_step(struct target *target,
 	target->debug_reason = DBG_REASON_SINGLESTEP;
 	target_call_event_callbacks(target, TARGET_EVENT_HALTED);
 
-	LOG_INFO("halted: PC: 0x%x", dsp563xx->core_regs[DSP563XX_REG_IDX_PC]);
+	LOG_INFO("halted: PC: 0x%" PRIx32, dsp563xx->core_regs[DSP563XX_REG_IDX_PC]);
 
 	return err;
 }
@@ -1323,12 +1369,6 @@ static int dsp563xx_deassert_reset(struct target *target)
 	} else
 		target->state = TARGET_RUNNING;
 
-	LOG_DEBUG("%s", __func__);
-	return ERROR_OK;
-}
-
-static int dsp563xx_soft_reset_halt(struct target *target)
-{
 	LOG_DEBUG("%s", __func__);
 	return ERROR_OK;
 }
@@ -1814,24 +1854,22 @@ static int dsp563xx_write_buffer_default(struct target *target,
 			buffer);
 }
 
-static int dsp563xx_add_breakpoint(struct target *target, struct breakpoint *breakpoint)
-{
-	return ERROR_OK;
-}
-
-static int dsp563xx_remove_breakpoint(struct target *target, struct breakpoint *breakpoint)
-{
-	return ERROR_OK;
-}
-
+/*
+ * Exit with error here, because we support watchpoints over a custom command.
+ * This is because the DSP has separate X,Y,P memspace which is not compatible to the
+ * traditional watchpoint logic.
+ */
 static int dsp563xx_add_watchpoint(struct target *target, struct watchpoint *watchpoint)
 {
-	return ERROR_OK;
+	return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 }
 
+/*
+ * @see dsp563xx_add_watchpoint
+ */
 static int dsp563xx_remove_watchpoint(struct target *target, struct watchpoint *watchpoint)
 {
-	return ERROR_OK;
+	return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 }
 
 static void handle_md_output(struct command_context *cmd_ctx,
@@ -1893,6 +1931,217 @@ static void handle_md_output(struct command_context *cmd_ctx,
 			output_len = 0;
 		}
 	}
+}
+
+static int dsp563xx_add_custom_watchpoint(struct target *target, uint32_t address, uint32_t memType,
+		enum watchpoint_rw rw, enum watchpoint_condition cond)
+{
+	int err = ERROR_OK;
+	struct dsp563xx_common *dsp563xx = target_to_dsp563xx(target);
+
+	bool wasRunning = false;
+	/* Only set breakpoint when halted */
+	if (target->state != TARGET_HALTED) {
+		dsp563xx_halt(target);
+		wasRunning = true;
+	}
+
+	if (dsp563xx->hardware_breakpoint[0].used) {
+		LOG_ERROR("Cannot add watchpoint. Hardware resource already used.");
+		err = ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
+	}
+
+	uint32_t obcr_value = 0;
+	if	(err == ERROR_OK) {
+		obcr_value |= OBCR_b0_or_b1;
+		switch (memType) {
+			case MEM_X:
+				obcr_value |= OBCR_BP_MEM_X;
+				break;
+			case MEM_Y:
+				obcr_value |= OBCR_BP_MEM_Y;
+				break;
+			case MEM_P:
+				obcr_value |= OBCR_BP_MEM_P;
+				break;
+			default:
+				LOG_ERROR("Unknown memType parameter (%" PRIu32 ")", memType);
+				err = ERROR_TARGET_INVALID;
+		}
+	}
+
+	if (err == ERROR_OK) {
+		switch (rw) {
+			case WPT_READ:
+				obcr_value |= OBCR_BP_0(OBCR_BP_ON_READ);
+				break;
+			case WPT_WRITE:
+				obcr_value |= OBCR_BP_0(OBCR_BP_ON_WRITE);
+				break;
+			case WPT_ACCESS:
+				obcr_value |= OBCR_BP_0(OBCR_BP_ON_READ|OBCR_BP_ON_WRITE);
+				break;
+			default:
+				LOG_ERROR("Unsupported write mode (%d)", rw);
+				err = ERROR_TARGET_INVALID;
+		}
+	}
+
+	if (err == ERROR_OK) {
+		switch (cond) {
+			case EQUAL:
+				obcr_value |= OBCR_BP_0(OBCR_BP_CC_EQUAL);
+				break;
+			case NOT_EQUAL:
+				obcr_value |= OBCR_BP_0(OBCR_BP_CC_NOT_EQUAL);
+				break;
+			case LESS_THAN:
+				obcr_value |= OBCR_BP_0(OBCR_BP_CC_LESS_THAN);
+				break;
+			case GREATER:
+				obcr_value |= OBCR_BP_0(OBCR_BP_CC_GREATER_THAN);
+				break;
+			default:
+				LOG_ERROR("Unsupported condition code (%d)", cond);
+				err = ERROR_TARGET_INVALID;
+		}
+	}
+
+	if (err == ERROR_OK)
+		err = dsp563xx_once_reg_write(target->tap, 1, DSP563XX_ONCE_OMLR0, address);
+
+	if (err == ERROR_OK)
+		err = dsp563xx_once_reg_write(target->tap, 1, DSP563XX_ONCE_OMLR1, 0x0);
+
+	if (err == ERROR_OK)
+		err = dsp563xx_once_reg_write(target->tap, 1, DSP563XX_ONCE_OBCR, obcr_value);
+
+	if (err == ERROR_OK) {
+		/* You should write the memory breakpoint counter to 0 */
+		err = dsp563xx_once_reg_write(target->tap, 1, DSP563XX_ONCE_OMBC, 0);
+	}
+
+	if (err == ERROR_OK) {
+		/* You should write the memory breakpoint counter to 0 */
+		err = dsp563xx_once_reg_write(target->tap, 1, DSP563XX_ONCE_OTC, 0);
+	}
+
+	if (err == ERROR_OK)
+		dsp563xx->hardware_breakpoint[0].used = BPU_WATCHPOINT;
+
+	if (err == ERROR_OK && wasRunning) {
+		/* Resume from current PC */
+		err = dsp563xx_resume(target, 1, 0x0, 0, 0);
+	}
+
+	return err;
+}
+
+static int dsp563xx_remove_custom_watchpoint(struct target *target)
+{
+	int err = ERROR_OK;
+	struct dsp563xx_common *dsp563xx = target_to_dsp563xx(target);
+
+	if (dsp563xx->hardware_breakpoint[0].used != BPU_WATCHPOINT) {
+		LOG_ERROR("Cannot remove watchpoint, as no watchpoint is currently configured!");
+		err = ERROR_TARGET_INVALID;
+	}
+
+	if (err == ERROR_OK) {
+		/* Clear watchpoint by clearing OBCR. */
+		err = dsp563xx_once_reg_write(target->tap, 1, DSP563XX_ONCE_OBCR, 0);
+	}
+
+	if (err == ERROR_OK)
+		dsp563xx->hardware_breakpoint[0].used = BPU_NONE;
+
+	return err;
+}
+
+COMMAND_HANDLER(dsp563xx_add_watchpoint_command)
+{
+	int err = ERROR_OK;
+	struct target *target = get_current_target(CMD_CTX);
+
+	uint32_t mem_type = 0;
+	switch (CMD_NAME[2]) {
+		case 'x':
+			mem_type = MEM_X;
+			break;
+		case 'y':
+			mem_type = MEM_Y;
+			break;
+		case 'p':
+			mem_type = MEM_P;
+			break;
+		default:
+			return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+
+	if (CMD_ARGC < 2)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+
+	uint32_t address = 0;
+	if (CMD_ARGC > 2)
+		COMMAND_PARSE_NUMBER(u32, CMD_ARGV[2], address);
+
+	enum watchpoint_condition cond;
+	switch (CMD_ARGV[0][0]) {
+		case '>':
+			cond = GREATER;
+			break;
+		case '<':
+			cond = LESS_THAN;
+			break;
+		case '=':
+			cond = EQUAL;
+			break;
+		case '!':
+			cond = NOT_EQUAL;
+			break;
+		default:
+			return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+
+	enum watchpoint_rw rw;
+	switch (CMD_ARGV[1][0]) {
+		case 'r':
+			rw = WPT_READ;
+			break;
+		case 'w':
+			rw = WPT_WRITE;
+			break;
+		case 'a':
+			rw = WPT_ACCESS;
+			break;
+		default:
+			return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+
+	err = dsp563xx_add_custom_watchpoint(target, address, mem_type, rw, cond);
+
+	return err;
+}
+
+/* Adding a breakpoint using the once breakpoint logic.
+ * Note that this mechanism is a true hw breakpoint and is share between the watchpoint logic.
+ * This means, you can only have one breakpoint/watchpoint at any time.
+ */
+static int dsp563xx_add_breakpoint(struct target *target, struct breakpoint *breakpoint)
+{
+	return dsp563xx_add_custom_watchpoint(target, breakpoint->address, MEM_P, WPT_READ, EQUAL);
+}
+
+static int dsp563xx_remove_breakpoint(struct target *target, struct breakpoint *breakpoint)
+{
+	return dsp563xx_remove_custom_watchpoint(target);
+}
+
+COMMAND_HANDLER(dsp563xx_remove_watchpoint_command)
+{
+	struct target *target = get_current_target(CMD_CTX);
+
+	return dsp563xx_remove_custom_watchpoint(target);
 }
 
 COMMAND_HANDLER(dsp563xx_mem_command)
@@ -1985,42 +2234,73 @@ static const struct command_registration dsp563xx_command_handlers[] = {
 		.handler = dsp563xx_mem_command,
 		.mode = COMMAND_EXEC,
 		.help = "write x memory words",
-		.usage = "mwwx address value [count]",
+		.usage = "address value [count]",
 	},
 	{
 		.name = "mwwy",
 		.handler = dsp563xx_mem_command,
 		.mode = COMMAND_EXEC,
 		.help = "write y memory words",
-		.usage = "mwwy address value [count]",
+		.usage = "address value [count]",
 	},
 	{
 		.name = "mwwp",
 		.handler = dsp563xx_mem_command,
 		.mode = COMMAND_EXEC,
 		.help = "write p memory words",
-		.usage = "mwwp address value [count]",
+		.usage = "address value [count]",
 	},
 	{
 		.name = "mdwx",
 		.handler = dsp563xx_mem_command,
 		.mode = COMMAND_EXEC,
 		.help = "display x memory words",
-		.usage = "mdwx address [count]",
+		.usage = "address [count]",
 	},
 	{
 		.name = "mdwy",
 		.handler = dsp563xx_mem_command,
 		.mode = COMMAND_EXEC,
 		.help = "display y memory words",
-		.usage = "mdwy address [count]",
+		.usage = "address [count]",
 	},
 	{
 		.name = "mdwp",
 		.handler = dsp563xx_mem_command,
 		.mode = COMMAND_EXEC,
 		.help = "display p memory words",
-		.usage = "mdwp address [count]",
+		.usage = "address [count]",
+	},
+  /*
+   * Watchpoint commands
+   */
+	{
+		.name = "wpp",
+		.handler = dsp563xx_add_watchpoint_command,
+		.mode = COMMAND_EXEC,
+		.help = "Create p memspace watchpoint",
+		.usage = "(>|<|=|!) (r|w|a) address",
+	},
+	{
+		.name = "wpx",
+		.handler = dsp563xx_add_watchpoint_command,
+		.mode = COMMAND_EXEC,
+		.help = "Create x memspace watchpoint",
+		.usage = "(>|<|=|!) (r|w|a) address",
+	},
+	{
+		.name = "wpy",
+		.handler = dsp563xx_add_watchpoint_command,
+		.mode = COMMAND_EXEC,
+		.help = "Create y memspace watchpoint",
+		.usage = "(>|<|=|!) (r|w|a) address",
+	},
+	{
+		.name = "rwpc",
+		.handler = dsp563xx_remove_watchpoint_command,
+		.mode = COMMAND_EXEC,
+		.help = "remove watchpoint custom",
+		.usage = " ",
 	},
 	COMMAND_REGISTRATION_DONE
 };
@@ -2032,8 +2312,6 @@ struct target_type dsp563xx_target = {
 	.poll = dsp563xx_poll,
 	.arch_state = dsp563xx_arch_state,
 
-	.target_request_data = NULL,
-
 	.get_gdb_reg_list = dsp563xx_get_gdb_reg_list,
 
 	.halt = dsp563xx_halt,
@@ -2042,7 +2320,6 @@ struct target_type dsp563xx_target = {
 
 	.assert_reset = dsp563xx_assert_reset,
 	.deassert_reset = dsp563xx_deassert_reset,
-	.soft_reset_halt = dsp563xx_soft_reset_halt,
 
 	.read_memory = dsp563xx_read_memory_default,
 	.write_memory = dsp563xx_write_memory_default,

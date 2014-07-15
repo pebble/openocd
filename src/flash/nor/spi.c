@@ -21,7 +21,6 @@
  *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  ***************************************************************************/
 
-
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -32,7 +31,7 @@
 
  /* Shared table of known SPI flash devices for SPI-based flash drivers. Taken
   * from device datasheets and Linux SPI flash drivers. */
-struct flash_device flash_devices[] = {
+const struct flash_device flash_devices[] = {
 	/* name, erase_cmd, chip_erase_cmd, device_id, pagesize, sectorsize, size_in_bytes */
 	FLASH_ID("st m25p05",      0xd8, 0xc7, 0x00102020, 0x80,  0x8000,  0x10000),
 	FLASH_ID("st m25p10",      0xd8, 0xc7, 0x00112020, 0x80,  0x8000,  0x20000),
@@ -52,6 +51,8 @@ struct flash_device flash_devices[] = {
 	FLASH_ID("sp s25fl016",    0xd8, 0xc7, 0x00140201, 0x100, 0x10000, 0x200000),
 	FLASH_ID("sp s25fl032",    0xd8, 0xc7, 0x00150201, 0x100, 0x10000, 0x400000),
 	FLASH_ID("sp s25fl064",    0xd8, 0xc7, 0x00160201, 0x100, 0x10000, 0x800000),
+	FLASH_ID("sp s25fl128",    0xd8, 0xC7, 0x00182001, 0x100, 0x10000, 0x1000000),
+	FLASH_ID("sp s25fl256",    0xd8, 0xC7, 0x00190201, 0x100, 0x10000, 0x2000000),
 	FLASH_ID("atmel 25f512",   0x52, 0xc7, 0x0065001f, 0x80,  0x8000,  0x10000),
 	FLASH_ID("atmel 25f1024",  0x52, 0x62, 0x0060001f, 0x100, 0x8000,  0x20000),
 	FLASH_ID("atmel 25f2048",  0x52, 0x62, 0x0063001f, 0x100, 0x10000, 0x40000),
@@ -66,6 +67,7 @@ struct flash_device flash_devices[] = {
 	FLASH_ID("mac 25l3205",    0xd8, 0xc7, 0x001620c2, 0x100, 0x10000, 0x400000),
 	FLASH_ID("mac 25l6405",    0xd8, 0xc7, 0x001720c2, 0x100, 0x10000, 0x800000),
 	FLASH_ID("mcr n25q064",    0xd8, 0xc7, 0x0017ba20, 0x100, 0x10000, 0x800000),
+	FLASH_ID("win w25q80bv",   0xd8, 0xc7, 0x001440ef, 0x100, 0x10000, 0x100000),
 	FLASH_ID("win w25q32dw",   0xd8, 0xc7, 0x001660ef, 0x100, 0x10000, 0x400000),
 	FLASH_ID("win w25q64cv",   0xd8, 0xc7, 0x001740ef, 0x100, 0x10000, 0x800000),
 	FLASH_ID(NULL,             0,    0,	   0,          0,     0,       0)

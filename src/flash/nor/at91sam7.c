@@ -98,7 +98,7 @@
 #define FLASH_SIZE_2048KB       14
 
 static int at91sam7_protect_check(struct flash_bank *bank);
-static int at91sam7_write(struct flash_bank *bank, uint8_t *buffer, uint32_t offset,
+static int at91sam7_write(struct flash_bank *bank, const uint8_t *buffer, uint32_t offset,
 		uint32_t count);
 
 static uint32_t at91sam7_get_flash_status(struct target *target, int bank_number);
@@ -106,11 +106,11 @@ static void at91sam7_set_flash_mode(struct flash_bank *bank, int mode);
 static uint32_t at91sam7_wait_status_busy(struct flash_bank *bank, uint32_t waitbits, int timeout);
 static int at91sam7_flash_command(struct flash_bank *bank, uint8_t cmd, uint16_t pagen);
 
-static uint32_t MC_FMR[4] = { 0xFFFFFF60, 0xFFFFFF70, 0xFFFFFF80, 0xFFFFFF90 };
-static uint32_t MC_FCR[4] = { 0xFFFFFF64, 0xFFFFFF74, 0xFFFFFF84, 0xFFFFFF94 };
-static uint32_t MC_FSR[4] = { 0xFFFFFF68, 0xFFFFFF78, 0xFFFFFF88, 0xFFFFFF98 };
+static const uint32_t MC_FMR[4] = { 0xFFFFFF60, 0xFFFFFF70, 0xFFFFFF80, 0xFFFFFF90 };
+static const uint32_t MC_FCR[4] = { 0xFFFFFF64, 0xFFFFFF74, 0xFFFFFF84, 0xFFFFFF94 };
+static const uint32_t MC_FSR[4] = { 0xFFFFFF68, 0xFFFFFF78, 0xFFFFFF88, 0xFFFFFF98 };
 
-static char *EPROC[8] = {
+static const char *EPROC[8] = {
 	"Unknown", "ARM946-E", "ARM7TDMI", "Unknown", "ARM920T", "ARM926EJ-S", "Unknown", "Unknown"
 };
 
@@ -954,7 +954,7 @@ static int at91sam7_protect(struct flash_bank *bank, int set, int first, int las
 	return ERROR_OK;
 }
 
-static int at91sam7_write(struct flash_bank *bank, uint8_t *buffer, uint32_t offset, uint32_t count)
+static int at91sam7_write(struct flash_bank *bank, const uint8_t *buffer, uint32_t offset, uint32_t count)
 {
 	int retval;
 	struct at91sam7_flash_bank *at91sam7_info = bank->driver_priv;

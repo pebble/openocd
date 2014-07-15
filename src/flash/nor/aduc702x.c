@@ -144,7 +144,7 @@ static int aduc702x_protect(struct flash_bank *bank, int set, int first, int las
  * Caller should not check for other return values specifically
  */
 static int aduc702x_write_block(struct flash_bank *bank,
-	uint8_t *buffer,
+	const uint8_t *buffer,
 	uint32_t offset,
 	uint32_t count)
 {
@@ -206,8 +206,10 @@ static int aduc702x_write_block(struct flash_bank *bank,
 		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 	}
 
-	retval = target_write_buffer(target, write_algorithm->address,
-			sizeof(aduc702x_flash_write_code), (uint8_t *)aduc702x_flash_write_code);
+	uint8_t code[sizeof(aduc702x_flash_write_code)];
+	target_buffer_set_u32_array(target, code, ARRAY_SIZE(aduc702x_flash_write_code),
+			aduc702x_flash_write_code);
+	retval = target_write_buffer(target, write_algorithm->address, sizeof(code), code);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -283,7 +285,7 @@ static int aduc702x_write_block(struct flash_bank *bank,
 /* All-JTAG, single-access method.  Very slow.  Used only if there is no
  * working area available. */
 static int aduc702x_write_single(struct flash_bank *bank,
-	uint8_t *buffer,
+	const uint8_t *buffer,
 	uint32_t offset,
 	uint32_t count)
 {
@@ -324,7 +326,7 @@ static int aduc702x_write_single(struct flash_bank *bank,
 	return ERROR_OK;
 }
 
-static int aduc702x_write(struct flash_bank *bank, uint8_t *buffer, uint32_t offset, uint32_t count)
+static int aduc702x_write(struct flash_bank *bank, const uint8_t *buffer, uint32_t offset, uint32_t count)
 {
 	int retval;
 
@@ -349,12 +351,6 @@ static int aduc702x_write(struct flash_bank *bank, uint8_t *buffer, uint32_t off
 
 static int aduc702x_probe(struct flash_bank *bank)
 {
-	return ERROR_OK;
-}
-
-static int aduc702x_info(struct flash_bank *bank, char *buf, int buf_size)
-{
-	snprintf(buf, buf_size, "aduc702x flash driver info");
 	return ERROR_OK;
 }
 
@@ -407,5 +403,4 @@ struct flash_driver aduc702x_flash = {
 	.auto_probe = aduc702x_probe,
 	.erase_check = default_flash_blank_check,
 	.protect_check = aduc702x_protect_check,
-	.info = aduc702x_info
 };

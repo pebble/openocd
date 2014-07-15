@@ -1513,6 +1513,9 @@ static void turtle_reset(int trst, int srst)
 {
 	trst = (int) trst;
 
+	if (trst == 1)
+		LOG_ERROR("Can't assert TRST: the adapter lacks this signal");
+
 	if (srst == 1)
 		low_output |= nSRST;
 	else if (srst == 0)
@@ -2339,6 +2342,11 @@ static int ft2232_init(void)
 	uint8_t buf[1];
 	int retval;
 	uint32_t bytes_written;
+
+	LOG_WARNING("Using DEPRECATED interface driver 'ft2232'");
+#if BUILD_FTDI
+	LOG_INFO("Consider using the 'ftdi' interface driver, with configuration files in interface/ftdi/...");
+#endif
 
 	if (tap_get_tms_path_len(TAP_IRPAUSE, TAP_IRPAUSE) == 7)
 		LOG_DEBUG("ft2232 interface using 7 step jtag state transitions");

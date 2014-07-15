@@ -34,7 +34,7 @@ struct tcl_connection {
 	int tc_outerror;/* flag an output error */
 };
 
-static const char *tcl_port;
+static char *tcl_port;
 
 /* handlers */
 static int tcl_new_connection(struct connection *connection);
@@ -176,7 +176,7 @@ static const struct command_registration tcl_command_handlers[] = {
 	{
 		.name = "tcl_port",
 		.handler = handle_tcl_port_command,
-		.mode = COMMAND_CONFIG,
+		.mode = COMMAND_ANY,
 		.help = "Specify port on which to listen "
 			"for incoming Tcl syntax.  "
 			"Read help on 'gdb_port'.",

@@ -162,13 +162,13 @@ struct command_invocation {
 typedef __COMMAND_HANDLER((*command_handler_t));
 
 struct command {
-	const char *name;
-	const char *help;
-	const char *usage;
+	char *name;
+	char *help;
+	char *usage;
 	struct command *parent;
 	struct command *children;
 	command_handler_t handler;
-	Jim_CmdProc jim_handler;
+	Jim_CmdProc *jim_handler;
 	void *jim_handler_data;
 	enum command_mode mode;
 	struct command *next;
@@ -204,7 +204,7 @@ char *command_name(struct command *c, char delim);
 struct command_registration {
 	const char *name;
 	command_handler_t handler;
-	Jim_CmdProc jim_handler;
+	Jim_CmdProc *jim_handler;
 	void *jim_handler_data;
 	enum command_mode mode;
 	const char *help;
@@ -353,6 +353,7 @@ int parse_llong(const char *str, long long *ul);
 		int parse ## name(const char *str, type * ul)
 
 DECLARE_PARSE_WRAPPER(_uint, unsigned);
+DECLARE_PARSE_WRAPPER(_u64, uint64_t);
 DECLARE_PARSE_WRAPPER(_u32, uint32_t);
 DECLARE_PARSE_WRAPPER(_u16, uint16_t);
 DECLARE_PARSE_WRAPPER(_u8, uint8_t);

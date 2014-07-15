@@ -363,15 +363,6 @@ static int arm11_arch_state(struct target *target)
 	return retval;
 }
 
-/* target request support */
-static int arm11_target_request_data(struct target *target,
-	uint32_t size, uint8_t *buffer)
-{
-	LOG_WARNING("Not implemented: %s", __func__);
-
-	return ERROR_FAIL;
-}
-
 /* target execution control */
 static int arm11_halt(struct target *target)
 {
@@ -769,13 +760,6 @@ static int arm11_deassert_reset(struct target *target)
 		CHECK_RETVAL(arm11_sc7_set_vcr(arm11, arm11->vcr));
 
 	return ERROR_OK;
-}
-
-static int arm11_soft_reset_halt(struct target *target)
-{
-	LOG_WARNING("Not implemented: %s", __func__);
-
-	return ERROR_FAIL;
 }
 
 /* target memory access
@@ -1340,15 +1324,12 @@ struct target_type arm11_target = {
 	.poll = arm11_poll,
 	.arch_state = arm11_arch_state,
 
-	.target_request_data = arm11_target_request_data,
-
 	.halt = arm11_halt,
 	.resume = arm11_resume,
 	.step = arm11_step,
 
 	.assert_reset = arm11_assert_reset,
 	.deassert_reset = arm11_deassert_reset,
-	.soft_reset_halt = arm11_soft_reset_halt,
 
 	.get_gdb_reg_list = arm_get_gdb_reg_list,
 

@@ -130,7 +130,7 @@ struct stm32x_flash_bank {
 
 static int stm32x_mass_erase(struct flash_bank *bank);
 static int stm32x_get_device_id(struct flash_bank *bank, uint32_t *device_id);
-static int stm32x_write_block(struct flash_bank *bank, uint8_t *buffer,
+static int stm32x_write_block(struct flash_bank *bank, const uint8_t *buffer,
 		uint32_t offset, uint32_t count);
 
 /* flash bank stm32x <base> <size> 0 0 <target#>
@@ -364,11 +364,6 @@ static int stm32x_protect_check(struct flash_bank *bank)
 	int num_bits;
 	int set;
 
-	if (target->state != TARGET_HALTED) {
-		LOG_ERROR("Target not halted");
-		return ERROR_TARGET_NOT_HALTED;
-	}
-
 	int retval = stm32x_check_operation_supported(bank);
 	if (ERROR_OK != retval)
 		return retval;
@@ -566,7 +561,7 @@ static int stm32x_protect(struct flash_bank *bank, int set, int first, int last)
 	return stm32x_write_options(bank);
 }
 
-static int stm32x_write_block(struct flash_bank *bank, uint8_t *buffer,
+static int stm32x_write_block(struct flash_bank *bank, const uint8_t *buffer,
 		uint32_t offset, uint32_t count)
 {
 	struct stm32x_flash_bank *stm32x_info = bank->driver_priv;
@@ -628,7 +623,7 @@ static int stm32x_write_block(struct flash_bank *bank, uint8_t *buffer,
 	};
 
 	retval = target_write_buffer(target, write_algorithm->address,
-			sizeof(stm32x_flash_write_code), (uint8_t *)stm32x_flash_write_code);
+			sizeof(stm32x_flash_write_code), stm32x_flash_write_code);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -697,7 +692,7 @@ static int stm32x_write_block(struct flash_bank *bank, uint8_t *buffer,
 	return retval;
 }
 
-static int stm32x_write(struct flash_bank *bank, uint8_t *buffer,
+static int stm32x_write(struct flash_bank *bank, const uint8_t *buffer,
 		uint32_t offset, uint32_t count)
 {
 	struct target *target = bank->target;
@@ -725,7 +720,7 @@ static int stm32x_write(struct flash_bank *bank, uint8_t *buffer,
 		}
 		LOG_INFO("odd number of bytes to write, padding with 0xff");
 		buffer = memcpy(new_buffer, buffer, count);
-		buffer[count++] = 0xff;
+		new_buffer[count++] = 0xff;
 	}
 
 	uint32_t words_remaining = count / 2;
@@ -926,11 +921,28 @@ static int stm32x_probe(struct flash_bank *bank)
 		stm32x_info->option_offset = 6;
 		stm32x_info->default_rdp = 0x55AA;
 		break;
-	case 0x440: /* stm32f0x */
-	case 0x444:
+	case 0x438: /* stm32f33x */
+		page_size = 2048;
+		stm32x_info->ppage_size = 2;
+		max_flash_size_in_kb = 64;
+		stm32x_info->user_data_offset = 16;
+		stm32x_info->option_offset = 6;
+		stm32x_info->default_rdp = 0x55AA;
+		break;
+	case 0x440: /* stm32f05x */
+	case 0x444: /* stm32f03x */
+	case 0x445: /* stm32f04x */
 		page_size = 1024;
 		stm32x_info->ppage_size = 4;
 		max_flash_size_in_kb = 64;
+		stm32x_info->user_data_offset = 16;
+		stm32x_info->option_offset = 6;
+		stm32x_info->default_rdp = 0x55AA;
+		break;
+	case 0x448: /* stm32f07x */
+		page_size = 2048;
+		stm32x_info->ppage_size = 4;
+		max_flash_size_in_kb = 128;
 		stm32x_info->user_data_offset = 16;
 		stm32x_info->option_offset = 6;
 		stm32x_info->default_rdp = 0x55AA;
@@ -1021,203 +1033,232 @@ COMMAND_HANDLER(stm32x_handle_part_id_command)
 
 static int get_stm32x_info(struct flash_bank *bank, char *buf, int buf_size)
 {
-	uint32_t device_id;
-	int printed;
+	uint32_t dbgmcu_idcode;
 
 		/* read stm32 device id register */
-	int retval = stm32x_get_device_id(bank, &device_id);
+	int retval = stm32x_get_device_id(bank, &dbgmcu_idcode);
 	if (retval != ERROR_OK)
 		return retval;
 
-	if ((device_id & 0xfff) == 0x410) {
-		printed = snprintf(buf, buf_size, "stm32x (Medium Density) - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+	uint16_t device_id = dbgmcu_idcode & 0xfff;
+	uint16_t rev_id = dbgmcu_idcode >> 16;
+	const char *device_str;
+	const char *rev_str = NULL;
 
-		switch (device_id >> 16) {
-			case 0x0000:
-				snprintf(buf, buf_size, "A");
-				break;
+	switch (device_id) {
+	case 0x410:
+		device_str = "STM32F10x (Medium Density)";
 
-			case 0x2000:
-				snprintf(buf, buf_size, "B");
-				break;
+		switch (rev_id) {
+		case 0x0000:
+			rev_str = "A";
+			break;
 
-			case 0x2001:
-				snprintf(buf, buf_size, "Z");
-				break;
+		case 0x2000:
+			rev_str = "B";
+			break;
 
-			case 0x2003:
-				snprintf(buf, buf_size, "Y");
-				break;
+		case 0x2001:
+			rev_str = "Z";
+			break;
 
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		case 0x2003:
+			rev_str = "Y";
+			break;
 		}
-	} else if ((device_id & 0xfff) == 0x412) {
-		printed = snprintf(buf, buf_size, "stm32x (Low Density) - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+		break;
 
-		switch (device_id >> 16) {
-			case 0x1000:
-				snprintf(buf, buf_size, "A");
-				break;
+	case 0x412:
+		device_str = "STM32F10x (Low Density)";
 
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
 		}
-	} else if ((device_id & 0xfff) == 0x414) {
-		printed = snprintf(buf, buf_size, "stm32x (High Density) - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+		break;
 
-		switch (device_id >> 16) {
-			case 0x1000:
-				snprintf(buf, buf_size, "A");
-				break;
+	case 0x414:
+		device_str = "STM32F10x (High Density)";
 
-			case 0x1001:
-				snprintf(buf, buf_size, "Z");
-				break;
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
 
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		case 0x1001:
+			rev_str = "Z";
+			break;
+
+		case 0x1003:
+			rev_str = "Y";
+			break;
 		}
-	} else if ((device_id & 0xfff) == 0x418) {
-		printed = snprintf(buf, buf_size, "stm32x (Connectivity) - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+		break;
 
-		switch (device_id >> 16) {
-			case 0x1000:
-				snprintf(buf, buf_size, "A");
-				break;
+	case 0x418:
+		device_str = "STM32F10x (Connectivity)";
 
-			case 0x1001:
-				snprintf(buf, buf_size, "Z");
-				break;
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
 
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		case 0x1001:
+			rev_str = "Z";
+			break;
 		}
-	} else if ((device_id & 0xfff) == 0x420) {
-		printed = snprintf(buf, buf_size, "stm32x (Value) - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+		break;
 
-		switch (device_id >> 16) {
-			case 0x1000:
-				snprintf(buf, buf_size, "A");
-				break;
+	case 0x420:
+		device_str = "STM32F100 (Low/Medium Density)";
 
-			case 0x1001:
-				snprintf(buf, buf_size, "Z");
-				break;
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
 
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		case 0x1001:
+			rev_str = "Z";
+			break;
 		}
-	} else if ((device_id & 0xfff) == 0x422) {
-		printed = snprintf(buf, buf_size, "stm32f30x - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+		break;
 
-		switch (device_id >> 16) {
-			case 0x1000:
-				snprintf(buf, buf_size, "A");
-				break;
+	case 0x422:
+		device_str = "STM32F30x";
 
-			case 0x1001:
-				snprintf(buf, buf_size, "Z");
-				break;
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
 
-			case 0x2000:
-				snprintf(buf, buf_size, "B");
-				break;
+		case 0x1001:
+			rev_str = "Z";
+			break;
 
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		case 0x1003:
+			rev_str = "Y";
+			break;
+
+		case 0x2000:
+			rev_str = "B";
+			break;
 		}
-	} else if ((device_id & 0xfff) == 0x428) {
-		printed = snprintf(buf, buf_size, "stm32x (Value HD) - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+		break;
 
-		switch (device_id >> 16) {
-			case 0x1000:
-				snprintf(buf, buf_size, "A");
-				break;
+	case 0x428:
+		device_str = "STM32F100 (High Density)";
 
-			case 0x1001:
-				snprintf(buf, buf_size, "Z");
-				break;
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
 
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		case 0x1001:
+			rev_str = "Z";
+			break;
 		}
-	} else if ((device_id & 0xfff) == 0x430) {
-		printed = snprintf(buf, buf_size, "stm32x (XL) - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+		break;
 
-		switch (device_id >> 16) {
-			case 0x1000:
-				snprintf(buf, buf_size, "A");
-				break;
+	case 0x430:
+		device_str = "STM32F10x (XL Density)";
 
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
 		}
-	} else if ((device_id & 0xfff) == 0x432) {
-		printed = snprintf(buf, buf_size, "stm32f37x - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+		break;
 
-		switch (device_id >> 16) {
-			case 0x1000:
-				snprintf(buf, buf_size, "A");
-				break;
+	case 0x432:
+		device_str = "STM32F37x";
 
-			case 0x2000:
-				snprintf(buf, buf_size, "B");
-				break;
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
 
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		case 0x2000:
+			rev_str = "B";
+			break;
 		}
-	} else if (((device_id & 0xfff) == 0x440) ||
-			((device_id & 0xfff) == 0x444)) {
-		printed = snprintf(buf, buf_size, "stm32f0x - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+		break;
 
-		switch (device_id >> 16) {
-			case 0x1000:
-				snprintf(buf, buf_size, "1.0");
-				break;
+	case 0x438:
+		device_str = "STM32F33x";
 
-			case 0x2000:
-				snprintf(buf, buf_size, "2.0");
-				break;
-
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
 		}
-	} else {
-		snprintf(buf, buf_size, "Cannot identify target as a stm32x\n");
+		break;
+
+	case 0x444:
+		device_str = "STM32F03x";
+
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "1.0";
+			break;
+
+		case 0x2000:
+			rev_str = "2.0";
+			break;
+		}
+		break;
+
+	case 0x440:
+		device_str = "STM32F05x";
+
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "1.0";
+			break;
+
+		case 0x2000:
+			rev_str = "2.0";
+			break;
+		}
+		break;
+
+	case 0x445:
+		device_str = "STM32F04x";
+
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "1.0";
+			break;
+
+		case 0x2000:
+			rev_str = "2.0";
+			break;
+		}
+		break;
+
+	case 0x448:
+		device_str = "STM32F07x";
+
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "1.0";
+			break;
+
+		case 0x2000:
+			rev_str = "2.0";
+			break;
+		}
+		break;
+
+	default:
+		snprintf(buf, buf_size, "Cannot identify target as a STM32F0/1/3\n");
 		return ERROR_FAIL;
 	}
+
+	if (rev_str != NULL)
+		snprintf(buf, buf_size, "%s - Rev: %s", device_str, rev_str);
+	else
+		snprintf(buf, buf_size, "%s - Rev: unknown (0x%04x)", device_str, rev_id);
 
 	return ERROR_OK;
 }
@@ -1340,10 +1381,10 @@ COMMAND_HANDLER(stm32x_handle_options_read_command)
 
 	int user_data = optionbyte;
 
-	if (buf_get_u32((uint8_t *)&optionbyte, OPT_ERROR, 1))
+	if (optionbyte >> OPT_ERROR & 1)
 		command_print(CMD_CTX, "Option Byte Complement Error");
 
-	if (buf_get_u32((uint8_t *)&optionbyte, OPT_READOUT, 1))
+	if (optionbyte >> OPT_READOUT & 1)
 		command_print(CMD_CTX, "Readout Protection On");
 	else
 		command_print(CMD_CTX, "Readout Protection Off");
@@ -1351,32 +1392,32 @@ COMMAND_HANDLER(stm32x_handle_options_read_command)
 	/* user option bytes are offset depending on variant */
 	optionbyte >>= stm32x_info->option_offset;
 
-	if (buf_get_u32((uint8_t *)&optionbyte, OPT_RDWDGSW, 1))
+	if (optionbyte >> OPT_RDWDGSW & 1)
 		command_print(CMD_CTX, "Software Watchdog");
 	else
 		command_print(CMD_CTX, "Hardware Watchdog");
 
-	if (buf_get_u32((uint8_t *)&optionbyte, OPT_RDRSTSTOP, 1))
+	if (optionbyte >> OPT_RDRSTSTOP & 1)
 		command_print(CMD_CTX, "Stop: No reset generated");
 	else
 		command_print(CMD_CTX, "Stop: Reset generated");
 
-	if (buf_get_u32((uint8_t *)&optionbyte, OPT_RDRSTSTDBY, 1))
+	if (optionbyte >> OPT_RDRSTSTDBY & 1)
 		command_print(CMD_CTX, "Standby: No reset generated");
 	else
 		command_print(CMD_CTX, "Standby: Reset generated");
 
 	if (stm32x_info->has_dual_banks) {
-		if (buf_get_u32((uint8_t *)&optionbyte, OPT_BFB2, 1))
+		if (optionbyte >> OPT_BFB2 & 1)
 			command_print(CMD_CTX, "Boot: Bank 0");
 		else
 			command_print(CMD_CTX, "Boot: Bank 1");
 	}
 
 	command_print(CMD_CTX, "User Option0: 0x%02" PRIx8,
-			(uint8_t) ((user_data >> stm32x_info->user_data_offset) & 0xff));
+			(uint8_t)((user_data >> stm32x_info->user_data_offset) & 0xff));
 	command_print(CMD_CTX, "User Option1: 0x%02" PRIx8,
-			(uint8_t) ((user_data >> (stm32x_info->user_data_offset + 8)) & 0xff));
+			(uint8_t)((user_data >> (stm32x_info->user_data_offset + 8)) & 0xff));
 
 	return ERROR_OK;
 }
@@ -1425,12 +1466,12 @@ COMMAND_HANDLER(stm32x_handle_options_write_command)
 		else if (strcmp("HWWDG", CMD_ARGV[0]) == 0)
 			optionbyte &= ~(1 << 0);
 		else if (strcmp("NORSTSTOP", CMD_ARGV[0]) == 0)
-			optionbyte &= ~(1 << 1);
-		else if (strcmp("RSTSTNDBY", CMD_ARGV[0]) == 0)
+			optionbyte |= (1 << 1);
+		else if (strcmp("RSTSTOP", CMD_ARGV[0]) == 0)
 			optionbyte &= ~(1 << 1);
 		else if (strcmp("NORSTSTNDBY", CMD_ARGV[0]) == 0)
-			optionbyte &= ~(1 << 2);
-		else if (strcmp("RSTSTOP", CMD_ARGV[0]) == 0)
+			optionbyte |= (1 << 2);
+		else if (strcmp("RSTSTNDBY", CMD_ARGV[0]) == 0)
 			optionbyte &= ~(1 << 2);
 		else if (stm32x_info->has_dual_banks) {
 			if (strcmp("BOOT0", CMD_ARGV[0]) == 0)

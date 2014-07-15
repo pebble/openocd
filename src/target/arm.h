@@ -58,8 +58,8 @@ enum arm_mode {
 	ARM_MODE_FIQ = 17,
 	ARM_MODE_IRQ = 18,
 	ARM_MODE_SVC = 19,
+	ARM_MODE_MON = 22,
 	ARM_MODE_ABT = 23,
-	ARM_MODE_MON = 26,
 	ARM_MODE_UND = 27,
 	ARM_MODE_SYS = 31,
 
@@ -97,7 +97,7 @@ struct arm {
 	/** Handle to the PC; valid in all core modes. */
 	struct reg *pc;
 
-	/** Handle to the CPSR; valid in all core modes. */
+	/** Handle to the CPSR/xPSR; valid in all core modes. */
 	struct reg *cpsr;
 
 	/** Handle to the SPSR; valid only in core modes with an SPSR. */
@@ -211,7 +211,8 @@ extern const struct command_registration arm_command_handlers[];
 
 int arm_arch_state(struct target *target);
 int arm_get_gdb_reg_list(struct target *target,
-		struct reg **reg_list[], int *reg_list_size);
+		struct reg **reg_list[], int *reg_list_size,
+		enum target_register_class reg_class);
 
 int arm_init_arch_info(struct target *target, struct arm *arm);
 

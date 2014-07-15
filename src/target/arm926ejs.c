@@ -691,6 +691,7 @@ int arm926ejs_init_arch_info(struct target *target, struct arm926ejs_common *arm
 
 	arm7_9->post_debug_entry = arm926ejs_post_debug_entry;
 	arm7_9->pre_restore_context = arm926ejs_pre_restore_context;
+	arm7_9->write_memory = arm926ejs_write_memory;
 
 	arm926ejs->read_cp15 = arm926ejs_cp15_read;
 	arm926ejs->write_cp15 = arm926ejs_cp15_write;
@@ -808,8 +809,7 @@ struct target_type arm926ejs_target = {
 	.get_gdb_reg_list = arm_get_gdb_reg_list,
 
 	.read_memory = arm7_9_read_memory,
-	.write_memory = arm926ejs_write_memory,
-	.bulk_write_memory = arm7_9_bulk_write_memory,
+	.write_memory = arm7_9_write_memory_opt,
 
 	.checksum_memory = arm_checksum_memory,
 	.blank_check_memory = arm_blank_check_memory,

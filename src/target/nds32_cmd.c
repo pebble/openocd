@@ -59,7 +59,8 @@ COMMAND_HANDLER(handle_nds32_dssim_command)
 			nds32->step_isr_enable = false;
 	}
 
-	command_print(CMD_CTX, "$INT_MASK.DSSIM: %d", nds32->step_isr_enable);
+	command_print(CMD_CTX, "%s: $INT_MASK.DSSIM: %d", target_name(target),
+			nds32->step_isr_enable);
 
 	return ERROR_OK;
 }
@@ -69,6 +70,7 @@ COMMAND_HANDLER(handle_nds32_memory_access_command)
 	struct target *target = get_current_target(CMD_CTX);
 	struct nds32 *nds32 = target_to_nds32(target);
 	struct aice_port_s *aice = target_to_aice(target);
+	struct nds32_memory *memory = &(nds32->memory);
 
 	if (!is_nds32(nds32)) {
 		command_print(CMD_CTX, "current target isn't an Andes core");
@@ -76,32 +78,22 @@ COMMAND_HANDLER(handle_nds32_memory_access_command)
 	}
 
 	if (CMD_ARGC > 0) {
+		if (strcmp(CMD_ARGV[0], "bus") == 0)
+			memory->access_channel = NDS_MEMORY_ACC_BUS;
+		else if (strcmp(CMD_ARGV[0], "cpu") == 0)
+			memory->access_channel = NDS_MEMORY_ACC_CPU;
+		else /* default access channel is NDS_MEMORY_ACC_CPU */
+			memory->access_channel = NDS_MEMORY_ACC_CPU;
 
-		/* If target has no cache, always use BUS mode
-		 * to access memory. */
-		struct nds32_memory *memory = &(nds32->memory);
+		LOG_DEBUG("memory access channel is changed to %s",
+				NDS_MEMORY_ACCESS_NAME[memory->access_channel]);
 
-		if (memory->dcache.line_size == 0) {
-			/* There is no Dcache. */
-			nds32->memory.access_channel = NDS_MEMORY_ACC_BUS;
-		} else if (memory->dcache.enable == false) {
-			/* Dcache is disabled. */
-			nds32->memory.access_channel = NDS_MEMORY_ACC_BUS;
-		} else {
-			/* There is Dcache and Dcache is enabled. */
-			if (strcmp(CMD_ARGV[0], "bus") == 0)
-				nds32->memory.access_channel = NDS_MEMORY_ACC_BUS;
-			else if (strcmp(CMD_ARGV[0], "cpu") == 0)
-				nds32->memory.access_channel = NDS_MEMORY_ACC_CPU;
-			else /* default access channel is NDS_MEMORY_ACC_CPU */
-				nds32->memory.access_channel = NDS_MEMORY_ACC_CPU;
-		}
-
-		aice_memory_access(aice, nds32->memory.access_channel);
+		aice_memory_access(aice, memory->access_channel);
+	} else {
+		command_print(CMD_CTX, "%s: memory access channel: %s",
+				target_name(target),
+				NDS_MEMORY_ACCESS_NAME[memory->access_channel]);
 	}
-
-	command_print(CMD_CTX, "memory access channel: %s",
-			NDS_MEMORY_ACCESS_NAME[nds32->memory.access_channel]);
 
 	return ERROR_OK;
 }
@@ -120,12 +112,13 @@ COMMAND_HANDLER(handle_nds32_memory_mode_command)
 	if (CMD_ARGC > 0) {
 
 		if (nds32->edm.access_control == false) {
-			command_print(CMD_CTX, "Target does not support ACC_CTL. "
-					"Set memory mode to MEMORY");
+			command_print(CMD_CTX, "%s does not support ACC_CTL. "
+					"Set memory mode to MEMORY", target_name(target));
 			nds32->memory.mode = NDS_MEMORY_SELECT_MEM;
 		} else if (nds32->edm.direct_access_local_memory == false) {
-			command_print(CMD_CTX, "Target does not support direct access "
-					"local memory. Set memory mode to MEMORY");
+			command_print(CMD_CTX, "%s does not support direct access "
+					"local memory. Set memory mode to MEMORY",
+					target_name(target));
 			nds32->memory.mode = NDS_MEMORY_SELECT_MEM;
 
 			/* set to ACC_CTL */
@@ -137,12 +130,14 @@ COMMAND_HANDLER(handle_nds32_memory_mode_command)
 				nds32->memory.mode = NDS_MEMORY_SELECT_MEM;
 			} else if (strcmp(CMD_ARGV[0], "ilm") == 0) {
 				if (nds32->memory.ilm_base == 0)
-					command_print(CMD_CTX, "Target does not support ILM");
+					command_print(CMD_CTX, "%s does not support ILM",
+							target_name(target));
 				else
 					nds32->memory.mode = NDS_MEMORY_SELECT_ILM;
 			} else if (strcmp(CMD_ARGV[0], "dlm") == 0) {
 				if (nds32->memory.dlm_base == 0)
-					command_print(CMD_CTX, "Target does not support DLM");
+					command_print(CMD_CTX, "%s does not support DLM",
+							target_name(target));
 				else
 					nds32->memory.mode = NDS_MEMORY_SELECT_DLM;
 			}
@@ -152,7 +147,8 @@ COMMAND_HANDLER(handle_nds32_memory_mode_command)
 		}
 	}
 
-	command_print(CMD_CTX, "memory mode: %s",
+	command_print(CMD_CTX, "%s: memory mode: %s",
+			target_name(target),
 			NDS_MEMORY_SELECT_NAME[nds32->memory.mode]);
 
 	return ERROR_OK;
@@ -179,41 +175,51 @@ COMMAND_HANDLER(handle_nds32_cache_command)
 				/* D$ write back */
 				result = aice_cache_ctl(aice, AICE_CACHE_CTL_L1D_WBALL, 0);
 				if (result != ERROR_OK) {
-					command_print(CMD_CTX, "Write back data cache...failed");
+					command_print(CMD_CTX, "%s: Write back data cache...failed",
+							target_name(target));
 					return result;
 				}
 
-				command_print(CMD_CTX, "Write back data cache...done");
+				command_print(CMD_CTX, "%s: Write back data cache...done",
+						target_name(target));
 
 				/* D$ invalidate */
 				result = aice_cache_ctl(aice, AICE_CACHE_CTL_L1D_INVALALL, 0);
 				if (result != ERROR_OK) {
-					command_print(CMD_CTX, "Invalidate data cache...failed");
+					command_print(CMD_CTX, "%s: Invalidate data cache...failed",
+							target_name(target));
 					return result;
 				}
 
-				command_print(CMD_CTX, "Invalidate data cache...done");
+				command_print(CMD_CTX, "%s: Invalidate data cache...done",
+						target_name(target));
 			} else {
 				if (dcache->line_size == 0)
-					command_print(CMD_CTX, "No data cache");
+					command_print(CMD_CTX, "%s: No data cache",
+							target_name(target));
 				else
-					command_print(CMD_CTX, "Data cache disabled");
+					command_print(CMD_CTX, "%s: Data cache disabled",
+							target_name(target));
 			}
 
 			if ((icache->line_size != 0) && (icache->enable == true)) {
 				/* I$ invalidate */
 				result = aice_cache_ctl(aice, AICE_CACHE_CTL_L1I_INVALALL, 0);
 				if (result != ERROR_OK) {
-					command_print(CMD_CTX, "Invalidate instruction cache...failed");
+					command_print(CMD_CTX, "%s: Invalidate instruction cache...failed",
+							target_name(target));
 					return result;
 				}
 
-				command_print(CMD_CTX, "Invalidate instruction cache...done");
+				command_print(CMD_CTX, "%s: Invalidate instruction cache...done",
+						target_name(target));
 			} else {
 				if (icache->line_size == 0)
-					command_print(CMD_CTX, "No instruction cache");
+					command_print(CMD_CTX, "%s: No instruction cache",
+							target_name(target));
 				else
-					command_print(CMD_CTX, "Instruction cache disabled");
+					command_print(CMD_CTX, "%s: Instruction cache disabled",
+							target_name(target));
 			}
 		} else
 			command_print(CMD_CTX, "No valid parameter");
@@ -238,7 +244,8 @@ COMMAND_HANDLER(handle_nds32_icache_command)
 	if (CMD_ARGC > 0) {
 
 		if (icache->line_size == 0) {
-			command_print(CMD_CTX, "No instruction cache");
+			command_print(CMD_CTX, "%s: No instruction cache",
+					target_name(target));
 			return ERROR_OK;
 		}
 
@@ -247,13 +254,16 @@ COMMAND_HANDLER(handle_nds32_icache_command)
 				/* I$ invalidate */
 				result = aice_cache_ctl(aice, AICE_CACHE_CTL_L1I_INVALALL, 0);
 				if (result != ERROR_OK) {
-					command_print(CMD_CTX, "Invalidate instruction cache...failed");
+					command_print(CMD_CTX, "%s: Invalidate instruction cache...failed",
+							target_name(target));
 					return result;
 				}
 
-				command_print(CMD_CTX, "Invalidate instruction cache...done");
+				command_print(CMD_CTX, "%s: Invalidate instruction cache...done",
+						target_name(target));
 			} else {
-				command_print(CMD_CTX, "Instruction cache disabled");
+				command_print(CMD_CTX, "%s: Instruction cache disabled",
+						target_name(target));
 			}
 		} else if (strcmp(CMD_ARGV[0], "enable") == 0) {
 			uint32_t value;
@@ -266,7 +276,7 @@ COMMAND_HANDLER(handle_nds32_icache_command)
 		} else if (strcmp(CMD_ARGV[0], "dump") == 0) {
 			/* TODO: dump cache content */
 		} else {
-			command_print(CMD_CTX, "No valid parameter");
+			command_print(CMD_CTX, "%s: No valid parameter", target_name(target));
 		}
 	}
 
@@ -289,7 +299,7 @@ COMMAND_HANDLER(handle_nds32_dcache_command)
 	if (CMD_ARGC > 0) {
 
 		if (dcache->line_size == 0) {
-			command_print(CMD_CTX, "No data cache");
+			command_print(CMD_CTX, "%s: No data cache", target_name(target));
 			return ERROR_OK;
 		}
 
@@ -298,22 +308,27 @@ COMMAND_HANDLER(handle_nds32_dcache_command)
 				/* D$ write back */
 				result = aice_cache_ctl(aice, AICE_CACHE_CTL_L1D_WBALL, 0);
 				if (result != ERROR_OK) {
-					command_print(CMD_CTX, "Write back data cache...failed");
+					command_print(CMD_CTX, "%s: Write back data cache...failed",
+							target_name(target));
 					return result;
 				}
 
-				command_print(CMD_CTX, "Write back data cache...done");
+				command_print(CMD_CTX, "%s: Write back data cache...done",
+						target_name(target));
 
 				/* D$ invalidate */
 				result = aice_cache_ctl(aice, AICE_CACHE_CTL_L1D_INVALALL, 0);
 				if (result != ERROR_OK) {
-					command_print(CMD_CTX, "Invalidate data cache...failed");
+					command_print(CMD_CTX, "%s: Invalidate data cache...failed",
+							target_name(target));
 					return result;
 				}
 
-				command_print(CMD_CTX, "Invalidate data cache...done");
+				command_print(CMD_CTX, "%s: Invalidate data cache...done",
+						target_name(target));
 			} else {
-				command_print(CMD_CTX, "Data cache disabled");
+				command_print(CMD_CTX, "%s: Data cache disabled",
+						target_name(target));
 			}
 		} else if (strcmp(CMD_ARGV[0], "enable") == 0) {
 			uint32_t value;
@@ -326,7 +341,7 @@ COMMAND_HANDLER(handle_nds32_dcache_command)
 		} else if (strcmp(CMD_ARGV[0], "dump") == 0) {
 			/* TODO: dump cache content */
 		} else {
-			command_print(CMD_CTX, "No valid parameter");
+			command_print(CMD_CTX, "%s: No valid parameter", target_name(target));
 		}
 	}
 
@@ -351,9 +366,11 @@ COMMAND_HANDLER(handle_nds32_auto_break_command)
 	}
 
 	if (nds32->auto_convert_hw_bp)
-		command_print(CMD_CTX, "convert sw break to hw break on ROM: on");
+		command_print(CMD_CTX, "%s: convert sw break to hw break on ROM: on",
+				target_name(target));
 	else
-		command_print(CMD_CTX, "convert sw break to hw break on ROM: off");
+		command_print(CMD_CTX, "%s: convert sw break to hw break on ROM: off",
+				target_name(target));
 
 	return ERROR_OK;
 }
@@ -376,9 +393,9 @@ COMMAND_HANDLER(handle_nds32_virtual_hosting_command)
 	}
 
 	if (nds32->virtual_hosting)
-		LOG_INFO("virtual hosting: on");
+		command_print(CMD_CTX, "%s: virtual hosting: on", target_name(target));
 	else
-		LOG_INFO("virtual hosting: off");
+		command_print(CMD_CTX, "%s: virtual hosting: off", target_name(target));
 
 	return ERROR_OK;
 }
@@ -401,9 +418,9 @@ COMMAND_HANDLER(handle_nds32_global_stop_command)
 	}
 
 	if (nds32->global_stop)
-		LOG_INFO("global stop: on");
+		LOG_INFO("%s: global stop: on", target_name(target));
 	else
-		LOG_INFO("global stop: off");
+		LOG_INFO("%s: global stop: off", target_name(target));
 
 	return ERROR_OK;
 }
@@ -426,9 +443,9 @@ COMMAND_HANDLER(handle_nds32_soft_reset_halt_command)
 	}
 
 	if (nds32->soft_reset_halt)
-		LOG_INFO("soft-reset-halt: on");
+		LOG_INFO("%s: soft-reset-halt: on", target_name(target));
 	else
-		LOG_INFO("soft-reset-halt: off");
+		LOG_INFO("%s: soft-reset-halt: off", target_name(target));
 
 	return ERROR_OK;
 }
@@ -460,8 +477,6 @@ COMMAND_HANDLER(handle_nds32_login_edm_passcode_command)
 	}
 
 	nds32->edm_passcode = strdup(CMD_ARGV[0]);
-
-	LOG_INFO("set EDM passcode: %s", nds32->edm_passcode);
 
 	return ERROR_OK;
 }
@@ -642,9 +657,9 @@ COMMAND_HANDLER(handle_nds32_query_endian_command)
 	nds32_get_mapped_reg(nds32, IR0, &value_psw);
 
 	if (value_psw & 0x20)
-		command_print(CMD_CTX, "BE");
+		command_print(CMD_CTX, "%s: BE", target_name(target));
 	else
-		command_print(CMD_CTX, "LE");
+		command_print(CMD_CTX, "%s: LE", target_name(target));
 
 	return ERROR_OK;
 }
@@ -689,18 +704,25 @@ static int jim_nds32_bulk_write(Jim_Interp *interp, int argc, Jim_Obj * const *a
 		return e;
 
 	uint32_t *data = malloc(count * sizeof(uint32_t));
+	if (data == NULL)
+		return JIM_ERR;
+
 	jim_wide i;
 	for (i = 0; i < count; i++) {
 		jim_wide tmp;
 		e = Jim_GetOpt_Wide(&goi, &tmp);
-		if (e != JIM_OK)
+		if (e != JIM_OK) {
+			free(data);
 			return e;
+		}
 		data[i] = (uint32_t)tmp;
 	}
 
 	/* all args must be consumed */
-	if (goi.argc != 0)
+	if (goi.argc != 0) {
+		free(data);
 		return JIM_ERR;
+	}
 
 	struct target *target = Jim_CmdPrivData(goi.interp);
 	int result;
@@ -738,7 +760,7 @@ static int jim_nds32_multi_write(Jim_Interp *interp, int argc, Jim_Obj * const *
 	uint32_t data;
 	jim_wide i;
 
-	aice_pack_command(aice, true);
+	aice_set_command_mode(aice, AICE_COMMAND_MODE_PACK);
 	for (i = 0; i < num_of_pairs; i++) {
 		jim_wide tmp;
 		e = Jim_GetOpt_Wide(&goi, &tmp);
@@ -755,7 +777,7 @@ static int jim_nds32_multi_write(Jim_Interp *interp, int argc, Jim_Obj * const *
 		if (result != ERROR_OK)
 			break;
 	}
-	aice_pack_command(aice, false);
+	aice_set_command_mode(aice, AICE_COMMAND_MODE_NORMAL);
 
 	/* all args must be consumed */
 	if (goi.argc != 0)
@@ -801,7 +823,7 @@ static int jim_nds32_bulk_read(Jim_Interp *interp, int argc, Jim_Obj * const *ar
 	jim_wide i;
 	Jim_SetResult(interp, Jim_NewEmptyStringObj(interp));
 	for (i = 0; i < count; i++) {
-		sprintf(data_str, "0x%08x ", data[i]);
+		sprintf(data_str, "0x%08" PRIx32 " ", data[i]);
 		Jim_AppendStrings(interp, Jim_GetResult(interp), data_str, NULL);
 	}
 
@@ -849,7 +871,7 @@ static int jim_nds32_read_edm_sr(Jim_Interp *interp, int argc, Jim_Obj * const *
 
 	aice_read_debug_reg(aice, edm_sr_number, &edm_sr_value);
 
-	sprintf(data_str, "0x%08x", edm_sr_value);
+	sprintf(data_str, "0x%08" PRIx32, edm_sr_value);
 	Jim_SetResult(interp, Jim_NewEmptyStringObj(interp));
 	Jim_AppendStrings(interp, Jim_GetResult(interp), data_str, NULL);
 

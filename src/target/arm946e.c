@@ -504,7 +504,7 @@ int arm946e_write_memory(struct target *target, uint32_t address,
 	/**
 	 * Write memory
 	 */
-	retval = arm7_9_write_memory(target, address, size, count, buffer);
+	retval = arm7_9_write_memory_opt(target, address, size, count, buffer);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -596,7 +596,7 @@ static int jim_arm946e_cp15(Jim_Interp *interp, int argc, Jim_Obj * const *argv)
 		if (retval != ERROR_OK)
 			return JIM_ERR;
 		char buf[20];
-		sprintf(buf, "0x%08x", value);
+		sprintf(buf, "0x%08" PRIx32, value);
 		/* Return value in hex format */
 		Jim_SetResultString(interp, buf, -1);
 	} else if (argc == 3) {
@@ -643,7 +643,8 @@ COMMAND_HANDLER(arm946e_handle_idcache)
 		if (csize == 0)
 			command_print(CMD_CTX, "%s-cache absent", icache ? "I" : "D");
 		else
-			command_print(CMD_CTX, "%s-cache size: %dK, %s", icache ? "I" : "D", csize, bena ? "enabled" : "disabled");
+			command_print(CMD_CTX, "%s-cache size: %" PRIu32 "K, %s",
+				      icache ? "I" : "D", csize, bena ? "enabled" : "disabled");
 		return ERROR_OK;
 	}
 
@@ -763,8 +764,6 @@ struct target_type arm946e_target = {
 	/* .write_memory = arm7_9_write_memory, */
 	.read_memory = arm946e_read_memory,
 	.write_memory = arm946e_write_memory,
-
-	.bulk_write_memory = arm7_9_bulk_write_memory,
 
 	.checksum_memory = arm_checksum_memory,
 	.blank_check_memory = arm_blank_check_memory,

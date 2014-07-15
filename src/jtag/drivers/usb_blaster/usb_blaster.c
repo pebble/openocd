@@ -4,6 +4,7 @@
  *   Inspired from original code from Kolja Waschk's USB-JTAG project
  *   (http://www.ixo.de/info/usb_jtag/), and from openocd project.
  *
+ *   Copyright (C) 2013 Franck Jullien franck.jullien@gmail.com
  *   Copyright (C) 2012 Robert Jarzmik robert.jarzmik@free.fr
  *   Copyright (C) 2011 Ali Lown ali@lown.me.uk
  *   Copyright (C) 2009 Catalin Patulea cat@vv.carleton.ca
@@ -48,6 +49,16 @@
  *           | 6 MHz XTAL  |  | 24 MHz Osc. |
  *           |_____________|  |_____________|
  *
+ * USB-JTAG, Altera USB-Blaster II are typically implemented as a Cypress
+ * EZ-USB FX2LP followed by a CPLD.
+ *            _____________    _________
+ *           |             |  |         |
+ *      USB__| EZ-USB FX2  |__| EPM570  |__JTAG (B_TDO,B_TDI,B_TMS,B_TCK)
+ *           |_____________|  |_________|
+ *            __|__________
+ *           |             |
+ *           | 24 MHz XTAL |
+ *           |_____________|
  */
 
 #ifdef HAVE_CONFIG_H
@@ -82,11 +93,23 @@
  */
 #define BUF_LEN 4096
 
+/* USB-Blaster II specific command */
+#define CMD_COPY_TDO_BUFFER	0x5F
+
+enum gpio_steer {
+	FIXED_0 = 0,
+	FIXED_1,
+	SRST,
+	TRST,
+};
+
 struct ublast_info {
-	int pin6;
-	int pin8;
+	enum gpio_steer pin6;
+	enum gpio_steer pin8;
 	int tms;
 	int tdi;
+	bool trst_asserted;
+	bool srst_asserted;
 	uint8_t buf[BUF_LEN];
 	int bufidx;
 
@@ -94,6 +117,9 @@ struct ublast_info {
 	struct ublast_lowlevel *drv;
 	char *ublast_device_desc;
 	uint16_t ublast_vid, ublast_pid;
+	uint16_t ublast_vid_uninit, ublast_pid_uninit;
+	int flags;
+	char *firmware_path;
 };
 
 /*
@@ -103,6 +129,10 @@ static struct ublast_info info = {
 	.ublast_vid = 0x09fb, /* Altera */
 	.ublast_pid = 0x6001, /* USB-Blaster */
 	.lowlevel_name = NULL,
+	.srst_asserted = false,
+	.trst_asserted = false,
+	.pin6 = FIXED_1,
+	.pin8 = FIXED_1,
 };
 
 /*
@@ -119,6 +149,9 @@ static struct drvs_map lowlevel_drivers_map[] = {
 #endif
 #if BUILD_USB_BLASTER_FTD2XX
 	{ .name = "ftd2xx", .drv_register = ublast_register_ftd2xx },
+#endif
+#if BUILD_USB_BLASTER_2
+	{ .name = "ublast2", .drv_register = ublast2_register_libusb },
 #endif
 	{ NULL, NULL },
 };
@@ -219,20 +252,6 @@ static void ublast_flush_buffer(void)
 #define READ_TDO	(1 << 0)
 
 /**
- * ublast_reset - reset the JTAG device is possible
- * @trst: 1 if TRST is to be asserted
- * @srst: 1 if SRST is to be asserted
- *
- * This is not implemented yet. If pin6 or pin8 controlls the TRST/SRST, code
- * should be added so that this function makes use of it.
- */
-static void ublast_reset(int trst, int srst)
-{
-	DEBUG_JTAG_IO("TODO: ublast_reset(%d,%d) isn't implemented!",
-		  trst, srst);
-}
-
-/**
  * ublast_queue_byte - queue one 'bitbang mode' byte for USB Blaster
  * @abyte: the byte to queue
  *
@@ -251,6 +270,28 @@ static void ublast_queue_byte(uint8_t abyte)
 }
 
 /**
+ * ublast_compute_pin - compute if gpio should be asserted
+ * @steer: control (ie. TRST driven, SRST driven, of fixed)
+ *
+ * Returns pin value (1 means driven high, 0 mean driven low)
+ */
+bool ublast_compute_pin(enum gpio_steer steer)
+{
+	switch (steer) {
+	case FIXED_0:
+		return 0;
+	case FIXED_1:
+		return 1;
+	case SRST:
+		return !info.srst_asserted;
+	case TRST:
+		return !info.trst_asserted;
+	default:
+		return 1;
+	}
+}
+
+/**
  * ublast_build_out - build bitbang mode output byte
  * @type: says if reading back TDO is required
  *
@@ -261,13 +302,29 @@ static uint8_t ublast_build_out(enum scan_type type)
 	uint8_t abyte = 0;
 
 	abyte |= info.tms ? TMS : 0;
-	abyte |= info.pin6 ? NCE : 0;
-	abyte |= info.pin8 ? NCS : 0;
+	abyte |= ublast_compute_pin(info.pin6) ? NCE : 0;
+	abyte |= ublast_compute_pin(info.pin8) ? NCS : 0;
 	abyte |= info.tdi ? TDI : 0;
 	abyte |= LED;
 	if (type == SCAN_IN || type == SCAN_IO)
 		abyte |= READ;
 	return abyte;
+}
+
+/**
+ * ublast_reset - reset the JTAG device is possible
+ * @trst: 1 if TRST is to be asserted
+ * @srst: 1 if SRST is to be asserted
+ */
+static void ublast_reset(int trst, int srst)
+{
+	uint8_t out_value;
+
+	info.trst_asserted = trst;
+	info.srst_asserted = srst;
+	out_value = ublast_build_out(SCAN_OUT);
+	ublast_queue_byte(out_value);
+	ublast_flush_buffer();
 }
 
 /**
@@ -594,8 +651,11 @@ static void ublast_queue_tdi(uint8_t *bits, int nb_bits, enum scan_type scan)
 			ublast_queue_bytes(&bits[i], trans);
 		else
 			ublast_queue_bytes(byte0, trans);
-		if (read_tdos)
+		if (read_tdos) {
+			if (info.flags & COPY_TDO_BUFFER)
+				ublast_queue_byte(CMD_COPY_TDO_BUFFER);
 			ublast_read_byteshifted_tdos(&tdos[i], trans);
+		}
 	}
 
 	/*
@@ -608,8 +668,11 @@ static void ublast_queue_tdi(uint8_t *bits, int nb_bits, enum scan_type scan)
 		else
 			ublast_clock_tdi(tdi, scan);
 	}
-	if (nb1 && read_tdos)
+	if (nb1 && read_tdos) {
+		if (info.flags & COPY_TDO_BUFFER)
+			ublast_queue_byte(CMD_COPY_TDO_BUFFER);
 		ublast_read_bitbang_tdos(&tdos[nb8], nb1);
+	}
 
 	if (bits)
 		memcpy(bits, tdos, DIV_ROUND_UP(nb_bits, 8));
@@ -687,10 +750,10 @@ static int ublast_scan(struct scan_command *cmd)
 	return ret;
 }
 
-static void ublast_msleep(int ms)
+static void ublast_usleep(int us)
 {
-	DEBUG_JTAG_IO("%s(ms=%d)",  __func__, ms);
-	jtag_sleep(ms);
+	DEBUG_JTAG_IO("%s(us=%d)",  __func__, us);
+	jtag_sleep(us);
 }
 
 static int ublast_execute_queue(void)
@@ -721,7 +784,7 @@ static int ublast_execute_queue(void)
 			ublast_tms(cmd->cmd.tms);
 			break;
 		case JTAG_SLEEP:
-			ublast_msleep(cmd->cmd.sleep->us);
+			ublast_usleep(cmd->cmd.sleep->us);
 			break;
 		case JTAG_SCAN:
 			ret = ublast_scan(cmd->cmd.scan);
@@ -767,6 +830,7 @@ static int ublast_init(void)
 			LOG_ERROR("no lowlevel driver found");
 			return ERROR_JTAG_DEVICE_ERROR;
 		}
+		info.lowlevel_name = strdup(lowlevel_drivers_map[i-1].name);
 	}
 
 	/*
@@ -774,7 +838,12 @@ static int ublast_init(void)
 	 */
 	info.drv->ublast_vid = info.ublast_vid;
 	info.drv->ublast_pid = info.ublast_pid;
+	info.drv->ublast_vid_uninit = info.ublast_vid_uninit;
+	info.drv->ublast_pid_uninit = info.ublast_pid_uninit;
 	info.drv->ublast_device_desc = info.ublast_device_desc;
+	info.drv->firmware_path = info.firmware_path;
+
+	info.flags |= info.drv->flags;
 
 	ret = info.drv->open(info.drv);
 	if (ret == ERROR_OK) {
@@ -812,25 +881,32 @@ static int ublast_quit(void)
 
 COMMAND_HANDLER(ublast_handle_device_desc_command)
 {
-	if (CMD_ARGC == 1)
-		info.ublast_device_desc = strdup(CMD_ARGV[0]);
-	else
-		LOG_ERROR("require exactly one argument to "
-				  "ublast_device_desc <description>");
+	if (CMD_ARGC != 1)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+
+	info.ublast_device_desc = strdup(CMD_ARGV[0]);
 
 	return ERROR_OK;
 }
 
 COMMAND_HANDLER(ublast_handle_vid_pid_command)
 {
-	if (CMD_ARGC > 2) {
+	if (CMD_ARGC > 4) {
 		LOG_WARNING("ignoring extra IDs in ublast_vid_pid "
-					"(maximum is 1 pair)");
-		CMD_ARGC = 2;
+					"(maximum is 2 pairs)");
+		CMD_ARGC = 4;
 	}
-	if (CMD_ARGC == 2) {
+
+	if (CMD_ARGC >= 2) {
 		COMMAND_PARSE_NUMBER(u16, CMD_ARGV[0], info.ublast_vid);
 		COMMAND_PARSE_NUMBER(u16, CMD_ARGV[1], info.ublast_pid);
+	} else {
+		LOG_WARNING("incomplete ublast_vid_pid configuration");
+	}
+
+	if (CMD_ARGC == 4) {
+		COMMAND_PARSE_NUMBER(u16, CMD_ARGV[2], info.ublast_vid_uninit);
+		COMMAND_PARSE_NUMBER(u16, CMD_ARGV[3], info.ublast_pid_uninit);
 	} else {
 		LOG_WARNING("incomplete ublast_vid_pid configuration");
 	}
@@ -841,24 +917,57 @@ COMMAND_HANDLER(ublast_handle_vid_pid_command)
 COMMAND_HANDLER(ublast_handle_pin_command)
 {
 	uint8_t out_value;
+	const char * const pin_name = CMD_ARGV[0];
+	enum gpio_steer *steer = NULL;
+	static const char * const pin_val_str[] = {
+		[FIXED_0] = "0",
+		[FIXED_1] = "1",
+		[SRST] = "SRST driven",
+		[TRST] = "TRST driven",
+	};
+
+	if (CMD_ARGC > 2) {
+		LOG_ERROR("%s takes exactly one or two arguments", CMD_NAME);
+		return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+
+	if (!strcmp(pin_name, "pin6"))
+		steer = &info.pin6;
+	if (!strcmp(pin_name, "pin8"))
+		steer = &info.pin8;
+	if (!steer) {
+		LOG_ERROR("%s: pin name must be \"pin6\" or \"pin8\"",
+			  CMD_NAME);
+		return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+
+	if (CMD_ARGC == 1) {
+		LOG_INFO("%s: %s is set as %s\n", CMD_NAME, pin_name,
+			 pin_val_str[*steer]);
+	}
 
 	if (CMD_ARGC == 2) {
-		const char * const pin_name = CMD_ARGV[0];
-		unsigned int state;
+		const char * const pin_value = CMD_ARGV[1];
+		char val = pin_value[0];
 
-		COMMAND_PARSE_NUMBER(uint, CMD_ARGV[1], state);
-		if ((state != 0) && (state != 1)) {
-			LOG_ERROR("%s: pin state must be 0 or 1", CMD_NAME);
-			return ERROR_COMMAND_SYNTAX_ERROR;
-		}
-
-		if (!strcmp(pin_name, "pin6")) {
-			info.pin6 = state;
-		} else if (!strcmp(pin_name, "pin8")) {
-			info.pin8 = state;
-		} else {
-			LOG_ERROR("%s: pin name must be \"pin6\" or \"pin8\"",
-					CMD_NAME);
+		if (strlen(pin_value) > 1)
+			val = '?';
+		switch (tolower((unsigned char)val)) {
+		case '0':
+			*steer = FIXED_0;
+			break;
+		case '1':
+			*steer = FIXED_1;
+			break;
+		case 't':
+			*steer = TRST;
+			break;
+		case 's':
+			*steer = SRST;
+			break;
+		default:
+			LOG_ERROR("%s: pin value must be 0, 1, s (SRST) or t (TRST)",
+				pin_value);
 			return ERROR_COMMAND_SYNTAX_ERROR;
 		}
 
@@ -867,22 +976,30 @@ COMMAND_HANDLER(ublast_handle_pin_command)
 			ublast_queue_byte(out_value);
 			ublast_flush_buffer();
 		}
-		return ERROR_OK;
-	} else {
-		LOG_ERROR("%s takes exactly two arguments", CMD_NAME);
-		return ERROR_COMMAND_SYNTAX_ERROR;
 	}
+	return ERROR_OK;
 }
 
 COMMAND_HANDLER(ublast_handle_lowlevel_drv_command)
 {
-	if (CMD_ARGC == 1)
-		info.lowlevel_name = strdup(CMD_ARGV[0]);
-	else
-		LOG_ERROR("require exactly one argument to "
-				  "usb_blaster_lowlevel_driver (ftdi|ftd2xx)");
+	if (CMD_ARGC != 1)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+
+	info.lowlevel_name = strdup(CMD_ARGV[0]);
+
 	return ERROR_OK;
 }
+
+COMMAND_HANDLER(ublast_firmware_command)
+{
+	if (CMD_ARGC != 1)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+
+	info.firmware_path = strdup(CMD_ARGV[0]);
+
+	return ERROR_OK;
+}
+
 
 static const struct command_registration ublast_command_handlers[] = {
 	{
@@ -896,22 +1013,31 @@ static const struct command_registration ublast_command_handlers[] = {
 		.name = "usb_blaster_vid_pid",
 		.handler = ublast_handle_vid_pid_command,
 		.mode = COMMAND_CONFIG,
-		.help = "the vendor ID and product ID of the USB-Blaster",
-		.usage = "vid pid",
+		.help = "the vendor ID and product ID of the USB-Blaster and " \
+			"vendor ID and product ID of the uninitialized device " \
+			"for USB-Blaster II",
+		.usage = "vid pid vid_uninit pid_uninit",
 	},
 	{
 		.name = "usb_blaster_lowlevel_driver",
 		.handler = ublast_handle_lowlevel_drv_command,
 		.mode = COMMAND_CONFIG,
-		.help = "set the lowlevel access for the USB Blaster (ftdi, ftd2xx)",
-		.usage = "(ftdi|ftd2xx)",
+		.help = "set the lowlevel access for the USB Blaster (ftdi, ftd2xx, ublast2)",
+		.usage = "(ftdi|ftd2xx|ublast2)",
 	},
 	{
-		.name = "usb_blaster",
+		.name = "usb_blaster_pin",
 		.handler = ublast_handle_pin_command,
 		.mode = COMMAND_ANY,
-		.help = "set pin state for the unused GPIO pins",
-		.usage = "(pin6|pin8) (0|1)",
+		.help = "show or set pin state for the unused GPIO pins",
+		.usage = "(pin6|pin8) (0|1|s|t)",
+	},
+		{
+		.name = "usb_blaster_firmware",
+		.handler = &ublast_firmware_command,
+		.mode = COMMAND_CONFIG,
+		.help = "configure the USB-Blaster II firmware location",
+		.usage = "path/to/blaster_xxxx.hex",
 	},
 	COMMAND_REGISTRATION_DONE
 };

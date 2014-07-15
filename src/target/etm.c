@@ -144,6 +144,7 @@ static const struct etm_reg_info etm_addr_comp[] = {
 	ADDR_COMPARATOR(14),
 	ADDR_COMPARATOR(15),
 	ADDR_COMPARATOR(16),
+	{ 0, 0, 0, 0, NULL }
 #undef ADDR_COMPARATOR
 };
 
@@ -162,6 +163,7 @@ static const struct etm_reg_info etm_data_comp[] = {
 	DATA_COMPARATOR(6),
 	DATA_COMPARATOR(7),
 	DATA_COMPARATOR(8),
+	{ 0, 0, 0, 0, NULL }
 #undef DATA_COMPARATOR
 };
 
@@ -179,6 +181,7 @@ static const struct etm_reg_info etm_counters[] = {
 	ETM_COUNTER(2),
 	ETM_COUNTER(3),
 	ETM_COUNTER(4),
+	{ 0, 0, 0, 0, NULL }
 #undef ETM_COUNTER
 };
 
@@ -206,6 +209,7 @@ static const struct etm_reg_info etm_outputs[] = {
 	ETM_OUTPUT(2),
 	ETM_OUTPUT(3),
 	ETM_OUTPUT(4),
+	{ 0, 0, 0, 0, NULL }
 #undef ETM_OUTPUT
 };
 
@@ -265,6 +269,11 @@ static void etm_reg_add(unsigned bcd_vers, struct arm_jtag *jtag_info,
 	 * version of the ETM, to the specified cache.
 	 */
 	for (; nreg--; r++) {
+		/* No more registers to add */
+		if (!r->size) {
+			LOG_ERROR("etm_reg_add is requested to add non-existing registers, ETM config might be bogus");
+			return;
+		}
 
 		/* this ETM may be too old to have some registers */
 		if (r->bcd_vers > bcd_vers)
@@ -309,7 +318,7 @@ struct reg_cache *etm_build_reg_cache(struct target *target,
 		etm_core, 1);
 
 	etm_get_reg(reg_list);
-	etm_ctx->config = buf_get_u32((void *)&arch_info->value, 0, 32);
+	etm_ctx->config = buf_get_u32(&arch_info->value, 0, 32);
 	config = etm_ctx->config;
 
 	/* figure ETM version then add base registers */
@@ -325,7 +334,7 @@ struct reg_cache *etm_build_reg_cache(struct target *target,
 			etm_core + 1, 1);
 		etm_get_reg(reg_list + 1);
 		etm_ctx->id = buf_get_u32(
-				(void *)&arch_info[1].value, 0, 32);
+				&arch_info[1].value, 0, 32);
 		LOG_DEBUG("ETM ID: %08x", (unsigned) etm_ctx->id);
 		bcd_vers = 0x10 + (((etm_ctx->id) >> 4) & 0xff);
 
@@ -922,7 +931,7 @@ static int etmv1_analyze_trace(struct etm_context *ctx, struct command_context *
 				 * and a new branch was encountered in cycle ctx->pipe_index + retval;
 				 */
 				LOG_WARNING(
-					"abandoned branch encountered, correctnes of analysis uncertain");
+					"abandoned branch encountered, correctness of analysis uncertain");
 				ctx->pipe_index += retval;
 				continue;
 			}
@@ -981,12 +990,12 @@ static int etmv1_analyze_trace(struct etm_context *ctx, struct command_context *
 
 			/* if we got here the branch was a normal PC change
 			 * (or a periodic synchronization point, which means the same for that matter)
-			 * if we didn't accquire a complete PC continue with the next cycle
+			 * if we didn't acquire a complete PC continue with the next cycle
 			 */
 			if (!ctx->pc_ok)
 				continue;
 
-			/* indirect branch to the exception vector means an exception occured */
+			/* indirect branch to the exception vector means an exception occurred */
 			if ((ctx->last_branch <= 0x20)
 				|| ((ctx->last_branch >= 0xffff0000) &&
 				(ctx->last_branch <= 0xffff0020))) {
@@ -1015,7 +1024,7 @@ static int etmv1_analyze_trace(struct etm_context *ctx, struct command_context *
 					return retval;
 				else if (retval == ERROR_TRACE_INSTRUCTION_UNAVAILABLE) {
 					/* TODO: handle incomplete images
-					 * for now we just quit the analsysis*/
+					 * for now we just quit the analysis*/
 					return retval;
 				}
 			}
@@ -1186,7 +1195,7 @@ static COMMAND_HELPER(handle_etm_tracemode_command_update,
 	/* IGNORED:
 	 *  - CPRT tracing (coprocessor register transfers)
 	 *  - debug request (causes debug entry on trigger)
-	 *  - stall on FIFOFULL (preventing tracedata lossage)
+	 *  - stall on FIFOFULL (preventing tracedata loss)
 	 */
 	*mode = tracemode;
 
@@ -1338,7 +1347,7 @@ COMMAND_HANDLER(handle_etm_config_command)
 	 *    check whether our setting "took".
 	 *
 	 *  - The "clock" and "mode" bits are interpreted differently.
-	 *    See ARM IHI 0014O table 2-17 for the old behavior, and
+	 *    See ARM IHI 0014O table 2-17 for the old behaviour, and
 	 *    table 2-18 for the new.  With ETB it's best to specify
 	 *    "normal full" ...
 	 */
@@ -2017,7 +2026,7 @@ const struct command_registration etm_command_handlers[] = {
 	{
 		.name = "etm",
 		.mode = COMMAND_ANY,
-		.help = "Emebdded Trace Macrocell command group",
+		.help = "Embedded Trace Macrocell command group",
 		.usage = "",
 		.chain = etm_config_command_handlers,
 	},

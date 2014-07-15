@@ -1,7 +1,5 @@
-This file includes highlights of the changes made in the
-OpenOCD  source archive release.  See the
-repository history for details about what changed, including
-bugfixes and other issues not mentioned here.
+This file includes highlights of the changes made in the OpenOCD
+source archive release.
 
 JTAG Layer:
 
@@ -13,13 +11,19 @@ Flash Layer:
 
 Board, Target, and Interface Configuration Scripts:
 
+Server Layer:
+
 Documentation:
 
 Build and Release:
 
-For more details about what has changed since the last release,
-see the git repository history.  With gitweb, you can browse that
-in various levels of detail.
+
+This release also contains a number of other important functional and
+cosmetic bugfixes. For more details about what has changed since the
+last release, see the git repository history:
+
+http://sourceforge.net/p/openocd/code/ci/v0.9.0/log/?path=
+
 
 For older NEWS, see the NEWS files associated with each release
 (i.e. NEWS-<version>).

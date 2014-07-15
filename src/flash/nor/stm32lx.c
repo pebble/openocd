@@ -88,6 +88,7 @@
 /* other registers */
 #define DBGMCU_IDCODE	0xE0042000
 #define F_SIZE			0x1FF8004C
+#define F_SIZE_MP		0x1FF800CC /* on 0x427 Medium+ and 0x436 HD devices */
 
 /* Constants */
 #define FLASH_PAGE_SIZE 256
@@ -148,6 +149,9 @@ FLASH_BANK_COMMAND_HANDLER(stm32lx_flash_bank_command)
 	stm32lx_info->has_dual_banks = false;
 	stm32lx_info->user_bank_size = bank->size;
 
+	/* the stm32l erased value is 0x00 */
+	bank->default_padded_value = 0x00;
+
 	return ERROR_OK;
 }
 
@@ -157,11 +161,6 @@ static int stm32lx_protect_check(struct flash_bank *bank)
 	struct target *target = bank->target;
 
 	uint32_t wrpr;
-
-	if (target->state != TARGET_HALTED) {
-		LOG_ERROR("Target not halted");
-		return ERROR_TARGET_NOT_HALTED;
-	}
 
 	/*
 	 * Read the WRPR word, and check each bit (corresponding to each
@@ -213,7 +212,7 @@ static int stm32lx_protect(struct flash_bank *bank, int set, int first,
 	return ERROR_OK;
 }
 
-static int stm32lx_write_half_pages(struct flash_bank *bank, uint8_t *buffer,
+static int stm32lx_write_half_pages(struct flash_bank *bank, const uint8_t *buffer,
 		uint32_t offset, uint32_t count)
 {
 	struct target *target = bank->target;
@@ -263,7 +262,7 @@ static int stm32lx_write_half_pages(struct flash_bank *bank, uint8_t *buffer,
 	retval = target_write_buffer(target,
 			write_algorithm->address,
 			sizeof(stm32lx_flash_write_code),
-			(uint8_t *)stm32lx_flash_write_code);
+			stm32lx_flash_write_code);
 	if (retval != ERROR_OK) {
 		target_free_working_area(target, write_algorithm);
 		return retval;
@@ -404,7 +403,7 @@ static int stm32lx_write_half_pages(struct flash_bank *bank, uint8_t *buffer,
 	return retval;
 }
 
-static int stm32lx_write(struct flash_bank *bank, uint8_t *buffer,
+static int stm32lx_write(struct flash_bank *bank, const uint8_t *buffer,
 		uint32_t offset, uint32_t count)
 {
 	struct target *target = bank->target;
@@ -554,13 +553,35 @@ static int stm32lx_probe(struct flash_bank *bank)
 		first_bank_size_in_kb = 192;
 		stm32lx_info->has_dual_banks = true;
 		break;
+	case 0x437:
+		/* Dual bank, high density */
+		max_flash_size_in_kb = 512;
+		first_bank_size_in_kb = 192;
+		stm32lx_info->has_dual_banks = true;
+		break;
 	default:
 		LOG_WARNING("Cannot identify target as a STM32L family.");
 		return ERROR_FAIL;
 	}
 
-	/* Get the flash size from target. */
-	retval = target_read_u16(target, F_SIZE, &flash_size_in_kb);
+	/* Get the flash size from target.  0x427 and 0x436 devices use a
+	 * different location for the Flash Size register, please see RM0038 r8 or
+	 * newer. */
+	if ((device_id & 0xfff) == 0x427 || (device_id & 0xfff) == 0x436 ||
+		(device_id & 0xfff) == 0x437)
+			retval = target_read_u16(target, F_SIZE_MP, &flash_size_in_kb);
+	else
+			retval = target_read_u16(target, F_SIZE, &flash_size_in_kb);
+
+	/* 0x436 devices report their flash size as a 0 or 1 code indicating 384K
+	 * or 256K, respectively.  Please see RM0038 r8 or newer and refer to
+	 * section 30.1.1. */
+	if (retval == ERROR_OK && (device_id & 0xfff) == 0x436) {
+		if (flash_size_in_kb == 0)
+			flash_size_in_kb = 384;
+		else if (flash_size_in_kb == 1)
+			flash_size_in_kb = 256;
+	}
 
 	/* Failed reading flash size or flash size invalid (early silicon),
 	 * default to max target family */
@@ -587,14 +608,15 @@ static int stm32lx_probe(struct flash_bank *bank)
 			/* This is the first bank */
 			flash_size_in_kb = first_bank_size_in_kb;
 		} else {
-			LOG_WARNING("STM32L flash bank base address config is incorrect. 0x%x but should rather be 0x%x or 0x%x",
+			LOG_WARNING("STM32L flash bank base address config is incorrect."
+				    " 0x%" PRIx32 " but should rather be 0x%" PRIx32 " or 0x%" PRIx32,
 						bank->base, base_address, second_bank_base);
 			return ERROR_FAIL;
 		}
-		LOG_INFO("STM32L flash has dual banks. Bank (%d) size is %dkb, base address is 0x%x",
+		LOG_INFO("STM32L flash has dual banks. Bank (%d) size is %dkb, base address is 0x%" PRIx32,
 				bank->bank_number, flash_size_in_kb, base_address);
 	} else {
-		LOG_INFO("STM32L flash size is %dkb, base address is 0x%x", flash_size_in_kb, base_address);
+		LOG_INFO("STM32L flash size is %dkb, base address is 0x%" PRIx32, flash_size_in_kb, base_address);
 	}
 
 	/* if the user sets the size manually then ignore the probed value
@@ -700,71 +722,86 @@ static int stm32lx_get_info(struct flash_bank *bank, char *buf, int buf_size)
 {
 	/* This method must return a string displaying information about the bank */
 
-	struct target *target = bank->target;
-	uint32_t device_id;
-	int printed;
+	uint32_t dbgmcu_idcode;
 
 	/* read stm32 device id register */
-	int retval = target_read_u32(target, DBGMCU_IDCODE, &device_id);
+	int retval = target_read_u32(bank->target, DBGMCU_IDCODE, &dbgmcu_idcode);
 	if (retval != ERROR_OK)
 		return retval;
 
-	if ((device_id & 0xfff) == 0x416) {
-		printed = snprintf(buf, buf_size, "stm32lx - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+	uint16_t device_id = dbgmcu_idcode & 0xfff;
+	uint16_t rev_id = dbgmcu_idcode >> 16;
+	const char *device_str;
+	const char *rev_str = NULL;
 
-		switch (device_id >> 16) {
-			case 0x1000:
-				snprintf(buf, buf_size, "A");
-				break;
+	switch (device_id) {
+	case 0x416:
+		device_str = "STM32L1xx (Low/Medium Density)";
 
-			case 0x1008:
-				snprintf(buf, buf_size, "Y");
-				break;
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
 
-			case 0x1018:
-				snprintf(buf, buf_size, "X");
-				break;
+		case 0x1008:
+			rev_str = "Y";
+			break;
 
-			case 0x1038:
-				snprintf(buf, buf_size, "W");
-				break;
+		case 0x1018:
+			rev_str = "X";
+			break;
 
-			case 0x1078:
-				snprintf(buf, buf_size, "V");
-				break;
+		case 0x1038:
+			rev_str = "W";
+			break;
 
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		case 0x1078:
+			rev_str = "V";
+			break;
 		}
-	} else if ((device_id & 0xfff) == 0x436) {
-		printed = snprintf(buf, buf_size, "stm32lx (HD) - Rev: ");
-		buf += printed;
-		buf_size -= printed;
+		break;
 
-		switch (device_id >> 16) {
-			case 0x1000:
-				snprintf(buf, buf_size, "A");
-				break;
+	case 0x427:
+		device_str = "STM32L1xx (Medium+ Density)";
 
-			case 0x1008:
-				snprintf(buf, buf_size, "Z");
-				break;
-
-			case 0x1018:
-				snprintf(buf, buf_size, "Y");
-				break;
-
-			default:
-				snprintf(buf, buf_size, "unknown");
-				break;
+		switch (rev_id) {
+		case 0x1018:
+			rev_str = "A";
+			break;
 		}
-	} else {
-		snprintf(buf, buf_size, "Cannot identify target as a stm32lx");
+		break;
+
+	case 0x436:
+		device_str = "STM32L1xx (Medium+/High Density)";
+
+		switch (rev_id) {
+		case 0x1000:
+			rev_str = "A";
+			break;
+
+		case 0x1008:
+			rev_str = "Z";
+			break;
+
+		case 0x1018:
+			rev_str = "Y";
+			break;
+		}
+		break;
+
+	case 0x437:
+		device_str = "STM32L1xx (Medium+/High Density)";
+		break;
+
+	default:
+		snprintf(buf, buf_size, "Cannot identify target as a STM32L1");
 		return ERROR_FAIL;
 	}
+
+	if (rev_str != NULL)
+		snprintf(buf, buf_size, "%s - Rev: %s", device_str, rev_str);
+	else
+		snprintf(buf, buf_size, "%s - Rev: unknown (0x%04x)", device_str, rev_id);
 
 	return ERROR_OK;
 }

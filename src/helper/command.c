@@ -57,7 +57,7 @@ struct log_capture_state {
 static void tcl_output(void *privData, const char *file, unsigned line,
 	const char *function, const char *string)
 {
-	struct log_capture_state *state = (struct log_capture_state *)privData;
+	struct log_capture_state *state = privData;
 	Jim_AppendString(state->interp, state->output, string, strlen(string));
 }
 
@@ -146,17 +146,17 @@ void script_debug(Jim_Interp *interp, const char *name,
 	free(dbg);
 }
 
-static void script_command_args_free(const char **words, unsigned nwords)
+static void script_command_args_free(char **words, unsigned nwords)
 {
 	for (unsigned i = 0; i < nwords; i++)
-		free((void *)words[i]);
+		free(words[i]);
 	free(words);
 }
 
-static const char **script_command_args_alloc(
+static char **script_command_args_alloc(
 	unsigned argc, Jim_Obj * const *argv, unsigned *nwords)
 {
-	const char **words = malloc(argc * sizeof(char *));
+	char **words = malloc(argc * sizeof(char *));
 	if (NULL == words)
 		return NULL;
 
@@ -198,7 +198,7 @@ static int script_command_run(Jim_Interp *interp,
 	LOG_USER_N("%s", "");	/* Keep GDB connection alive*/
 
 	unsigned nwords;
-	const char **words = script_command_args_alloc(argc, argv, &nwords);
+	char **words = script_command_args_alloc(argc, argv, &nwords);
 	if (NULL == words)
 		return JIM_ERR;
 
@@ -299,12 +299,9 @@ static void command_free(struct command *c)
 		command_free(tmp);
 	}
 
-	if (c->name)
-		free((void *)c->name);
-	if (c->help)
-		free((void *)c->help);
-	if (c->usage)
-		free((void *)c->usage);
+	free(c->name);
+	free(c->help);
+	free(c->usage);
 	free(c);
 }
 
@@ -362,27 +359,27 @@ static int register_command_handler(struct command_context *cmd_ctx,
 	struct command *c)
 {
 	Jim_Interp *interp = cmd_ctx->interp;
-	const char *ocd_name = alloc_printf("ocd_%s", c->name);
+	char *ocd_name = alloc_printf("ocd_%s", c->name);
 	if (NULL == ocd_name)
 		return JIM_ERR;
 
 	LOG_DEBUG("registering '%s'...", ocd_name);
 
-	Jim_CmdProc func = c->handler ? &script_command : &command_unknown;
+	Jim_CmdProc *func = c->handler ? &script_command : &command_unknown;
 	int retval = Jim_CreateCommand(interp, ocd_name, func, c, NULL);
-	free((void *)ocd_name);
+	free(ocd_name);
 	if (JIM_OK != retval)
 		return retval;
 
 	/* we now need to add an overrideable proc */
-	const char *override_name = alloc_printf(
+	char *override_name = alloc_printf(
 			"proc %s {args} {eval ocd_bouncer %s $args}",
 			c->name, c->name);
 	if (NULL == override_name)
 		return JIM_ERR;
 
 	retval = Jim_Eval_Named(interp, override_name, 0, 0);
-	free((void *)override_name);
+	free(override_name);
 
 	return retval;
 }
@@ -814,13 +811,13 @@ static COMMAND_HELPER(command_help_find, struct command *head,
 }
 
 static COMMAND_HELPER(command_help_show, struct command *c, unsigned n,
-	bool show_help, const char *match);
+	bool show_help, const char *cmd_match);
 
 static COMMAND_HELPER(command_help_show_list, struct command *head, unsigned n,
-	bool show_help, const char *match)
+	bool show_help, const char *cmd_match)
 {
 	for (struct command *c = head; NULL != c; c = c->next)
-		CALL_COMMAND_HANDLER(command_help_show, c, n, show_help, match);
+		CALL_COMMAND_HANDLER(command_help_show, c, n, show_help, cmd_match);
 	return ERROR_OK;
 }
 
@@ -852,7 +849,7 @@ static void command_help_show_wrap(const char *str, unsigned n, unsigned n2)
 }
 
 static COMMAND_HELPER(command_help_show, struct command *c, unsigned n,
-	bool show_help, const char *match)
+	bool show_help, const char *cmd_match)
 {
 	char *cmd_name = command_name(c, ' ');
 	if (NULL == cmd_name)
@@ -860,9 +857,9 @@ static COMMAND_HELPER(command_help_show, struct command *c, unsigned n,
 
 	/* If the match string occurs anywhere, we print out
 	 * stuff for this command. */
-	bool is_match = (strstr(cmd_name, match) != NULL) ||
-		((c->usage != NULL) && (strstr(c->usage, match) != NULL)) ||
-		((c->help != NULL) && (strstr(c->help, match) != NULL));
+	bool is_match = (strstr(cmd_name, cmd_match) != NULL) ||
+		((c->usage != NULL) && (strstr(c->usage, cmd_match) != NULL)) ||
+		((c->help != NULL) && (strstr(c->help, cmd_match) != NULL));
 
 	if (is_match) {
 		command_help_show_indent(n);
@@ -871,7 +868,7 @@ static COMMAND_HELPER(command_help_show, struct command *c, unsigned n,
 	free(cmd_name);
 
 	if (is_match) {
-		if (c->usage) {
+		if (c->usage && strlen(c->usage) > 0) {
 			LOG_USER_N(" ");
 			command_help_show_wrap(c->usage, 0, n + 5);
 		} else
@@ -913,7 +910,7 @@ static COMMAND_HELPER(command_help_show, struct command *c, unsigned n,
 	}
 
 	return CALL_COMMAND_HANDLER(command_help_show_list,
-		c->children, n, show_help, match);
+		c->children, n, show_help, cmd_match);
 }
 
 COMMAND_HANDLER(handle_help_command)
@@ -921,26 +918,26 @@ COMMAND_HANDLER(handle_help_command)
 	bool full = strcmp(CMD_NAME, "help") == 0;
 	int retval;
 	struct command *c = CMD_CTX->commands;
-	char *match = NULL;
+	char *cmd_match = NULL;
 
 	if (CMD_ARGC == 0)
-		match = "";
+		cmd_match = "";
 	else if (CMD_ARGC >= 1) {
 		unsigned i;
 
 		for (i = 0; i < CMD_ARGC; ++i) {
-			if (NULL != match) {
-				char *prev = match;
+			if (NULL != cmd_match) {
+				char *prev = cmd_match;
 
-				match = alloc_printf("%s %s", match, CMD_ARGV[i]);
+				cmd_match = alloc_printf("%s %s", cmd_match, CMD_ARGV[i]);
 				free(prev);
-				if (NULL == match) {
+				if (NULL == cmd_match) {
 					LOG_ERROR("unable to build search string");
 					return -ENOMEM;
 				}
 			} else {
-				match = alloc_printf("%s", CMD_ARGV[i]);
-				if (NULL == match) {
+				cmd_match = alloc_printf("%s", CMD_ARGV[i]);
+				if (NULL == cmd_match) {
 					LOG_ERROR("unable to build search string");
 					return -ENOMEM;
 				}
@@ -950,10 +947,10 @@ COMMAND_HANDLER(handle_help_command)
 		return ERROR_COMMAND_SYNTAX_ERROR;
 
 	retval = CALL_COMMAND_HANDLER(command_help_show_list,
-			c, 0, full, match);
+			c, 0, full, cmd_match);
 
 	if (CMD_ARGC >= 1)
-		free(match);
+		free(cmd_match);
 	return retval;
 }
 
@@ -1103,7 +1100,7 @@ int help_add_command(struct command_context *cmd_ctx, struct command *parent,
 	if (help_text) {
 		bool replaced = false;
 		if (nc->help) {
-			free((void *)nc->help);
+			free(nc->help);
 			replaced = true;
 		}
 		nc->help = strdup(help_text);
@@ -1115,7 +1112,7 @@ int help_add_command(struct command_context *cmd_ctx, struct command *parent,
 	if (usage) {
 		bool replaced = false;
 		if (nc->usage) {
-			free((void *)nc->usage);
+			free(nc->usage);
 			replaced = true;
 		}
 		nc->usage = strdup(usage);
@@ -1404,19 +1401,21 @@ DEFINE_PARSE_NUM_TYPE(_llong, long long, strtoll, LLONG_MIN, LLONG_MAX)
 		return ERROR_OK; \
 	}
 
-#define DEFINE_PARSE_ULONG(name, type, min, max) \
-	DEFINE_PARSE_WRAPPER(name, type, min, max, unsigned long, _ulong)
-DEFINE_PARSE_ULONG(_uint, unsigned, 0, UINT_MAX)
-DEFINE_PARSE_ULONG(_u32, uint32_t, 0, UINT32_MAX)
-DEFINE_PARSE_ULONG(_u16, uint16_t, 0, UINT16_MAX)
-DEFINE_PARSE_ULONG(_u8, uint8_t, 0, UINT8_MAX)
+#define DEFINE_PARSE_ULONGLONG(name, type, min, max) \
+	DEFINE_PARSE_WRAPPER(name, type, min, max, unsigned long long, _ullong)
+DEFINE_PARSE_ULONGLONG(_uint, unsigned, 0, UINT_MAX)
+DEFINE_PARSE_ULONGLONG(_u64,  uint64_t, 0, UINT64_MAX)
+DEFINE_PARSE_ULONGLONG(_u32,  uint32_t, 0, UINT32_MAX)
+DEFINE_PARSE_ULONGLONG(_u16,  uint16_t, 0, UINT16_MAX)
+DEFINE_PARSE_ULONGLONG(_u8,   uint8_t,  0, UINT8_MAX)
 
-#define DEFINE_PARSE_LONG(name, type, min, max)	\
-	DEFINE_PARSE_WRAPPER(name, type, min, max, long, _long)
-DEFINE_PARSE_LONG(_int, int, n < INT_MIN, INT_MAX)
-DEFINE_PARSE_LONG(_s32, int32_t, n < INT32_MIN, INT32_MAX)
-DEFINE_PARSE_LONG(_s16, int16_t, n < INT16_MIN, INT16_MAX)
-DEFINE_PARSE_LONG(_s8, int8_t, n < INT8_MIN, INT8_MAX)
+#define DEFINE_PARSE_LONGLONG(name, type, min, max) \
+	DEFINE_PARSE_WRAPPER(name, type, min, max, long long, _llong)
+DEFINE_PARSE_LONGLONG(_int, int,     n < INT_MIN,   INT_MAX)
+DEFINE_PARSE_LONGLONG(_s64, int64_t, n < INT64_MIN, INT64_MAX)
+DEFINE_PARSE_LONGLONG(_s32, int32_t, n < INT32_MIN, INT32_MAX)
+DEFINE_PARSE_LONGLONG(_s16, int16_t, n < INT16_MIN, INT16_MAX)
+DEFINE_PARSE_LONGLONG(_s8,  int8_t,  n < INT8_MIN,  INT8_MAX)
 
 static int command_parse_bool(const char *in, bool *out,
 	const char *on, const char *off)

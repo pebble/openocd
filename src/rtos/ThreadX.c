@@ -155,25 +155,7 @@ static int ThreadX_update_threads(struct rtos *rtos)
 	}
 
 	/* wipe out previous thread details if any */
-	if (rtos->thread_details != NULL) {
-		int j;
-		for (j = 0; j < rtos->thread_count; j++) {
-			if (rtos->thread_details[j].display_str != NULL) {
-				free(rtos->thread_details[j].display_str);
-				rtos->thread_details[j].display_str = NULL;
-			}
-			if (rtos->thread_details[j].thread_name_str != NULL) {
-				free(rtos->thread_details[j].thread_name_str);
-				rtos->thread_details[j].thread_name_str = NULL;
-			}
-			if (rtos->thread_details[j].extra_info_str != NULL) {
-				free(rtos->thread_details[j].extra_info_str);
-				rtos->thread_details[j].extra_info_str = NULL;
-			}
-		}
-		free(rtos->thread_details);
-		rtos->thread_details = NULL;
-	}
+	rtos_free_threadlist(rtos);
 
 	/* read the current thread id */
 	retval = target_read_buffer(rtos->target,
@@ -193,13 +175,13 @@ static int ThreadX_update_threads(struct rtos *rtos)
 		char tmp_str[] = "Current Execution";
 		thread_list_size++;
 		tasks_found++;
-		rtos->thread_details = (struct thread_detail *) malloc(
+		rtos->thread_details = malloc(
 				sizeof(struct thread_detail) * thread_list_size);
 		rtos->thread_details->threadid = 1;
 		rtos->thread_details->exists = true;
 		rtos->thread_details->display_str = NULL;
 		rtos->thread_details->extra_info_str = NULL;
-		rtos->thread_details->thread_name_str = (char *) malloc(sizeof(tmp_str));
+		rtos->thread_details->thread_name_str = malloc(sizeof(tmp_str));
 		strcpy(rtos->thread_details->thread_name_str, tmp_str);
 
 		if (thread_list_size == 0) {
@@ -208,7 +190,7 @@ static int ThreadX_update_threads(struct rtos *rtos)
 		}
 	} else {
 		/* create space for new thread details */
-		rtos->thread_details = (struct thread_detail *) malloc(
+		rtos->thread_details = malloc(
 				sizeof(struct thread_detail) * thread_list_size);
 	}
 
@@ -261,7 +243,7 @@ static int ThreadX_update_threads(struct rtos *rtos)
 			strcpy(tmp_str, "No Name");
 
 		rtos->thread_details[tasks_found].thread_name_str =
-			(char *)malloc(strlen(tmp_str)+1);
+			malloc(strlen(tmp_str)+1);
 		strcpy(rtos->thread_details[tasks_found].thread_name_str, tmp_str);
 
 		/* Read the thread status */
@@ -286,7 +268,7 @@ static int ThreadX_update_threads(struct rtos *rtos)
 		else
 			state_desc = "Unknown state";
 
-		rtos->thread_details[tasks_found].extra_info_str = (char *)malloc(strlen(
+		rtos->thread_details[tasks_found].extra_info_str = malloc(strlen(
 					state_desc)+1);
 		strcpy(rtos->thread_details[tasks_found].extra_info_str, state_desc);
 
@@ -349,7 +331,7 @@ static int ThreadX_get_thread_reg_list(struct rtos *rtos, int64_t thread_id, cha
 static int ThreadX_get_symbol_list_to_lookup(symbol_table_elem_t *symbol_list[])
 {
 	unsigned int i;
-	*symbol_list = (symbol_table_elem_t *) malloc(
+	*symbol_list = malloc(
 			sizeof(symbol_table_elem_t) * ARRAY_SIZE(ThreadX_symbol_list));
 
 	for (i = 0; i < ARRAY_SIZE(ThreadX_symbol_list); i++)
@@ -430,7 +412,7 @@ static int ThreadX_get_thread_detail(struct rtos *rtos,
 	if (tmp_str[0] == '\x00')
 		strcpy(tmp_str, "No Name");
 
-	detail->thread_name_str = (char *)malloc(strlen(tmp_str)+1);
+	detail->thread_name_str = malloc(strlen(tmp_str)+1);
 
 	/* Read the thread status */
 	int64_t thread_status = 0;
@@ -455,7 +437,7 @@ static int ThreadX_get_thread_detail(struct rtos *rtos,
 	else
 		state_desc = "Unknown state";
 
-	detail->extra_info_str = (char *)malloc(strlen(state_desc)+1);
+	detail->extra_info_str = malloc(strlen(state_desc)+1);
 
 	detail->exists = true;
 

@@ -45,9 +45,11 @@ struct hl_interface_param_s {
 	/** */
 	enum hl_transports transport;
 	/** */
-	int max_buffer;
-	/** */
 	bool connect_under_reset;
+	/** Output file for trace data (if any) */
+	FILE *trace_f;
+	/** Trace module source clock rate */
+	uint32_t trace_source_hz;
 };
 
 struct hl_interface_s {
@@ -56,7 +58,7 @@ struct hl_interface_s {
 	/** */
 	const struct hl_layout *layout;
 	/** */
-	void *fd;
+	void *handle;
 };
 
 /** */

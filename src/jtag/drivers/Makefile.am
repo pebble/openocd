@@ -6,12 +6,16 @@ libocdjtagdrivers_la_LIBADD =
 libocdjtagdrivers_la_SOURCES = \
 	$(DRIVERFILES)
 
-ocddatadir = $(pkglibdir)
-nobase_dist_ocddata_DATA =
+libocdjtagdrivers_la_CPPFLAGS = $(AM_CPPFLAGS) $(LIBUSB1_CFLAGS) \
+	$(LIBUSB0_CFLAGS) $(HIDAPI_CFLAGS) $(LIBFTDI_CFLAGS)
 
 ULINK_FIRMWARE = $(srcdir)/OpenULINK
 
-EXTRA_DIST = $(ULINK_FIRMWARE)
+EXTRA_DIST = $(ULINK_FIRMWARE) \
+	usb_blaster/README.CheapClone \
+	Makefile.rlink \
+	rlink_call.m4 \
+	rlink_init.m4
 
 DRIVERFILES =
 SUBDIRS=
@@ -42,8 +46,11 @@ endif
 if FT2232_DRIVER
 DRIVERFILES += ft2232.c
 endif
-if FTDI_DRIVER
+if FTDI
 DRIVERFILES += ftdi.c mpsse.c
+endif
+if JTAG_VPI
+DRIVERFILES += jtag_vpi.c
 endif
 if USB_BLASTER_DRIVER
 SUBDIRS += usb_blaster
@@ -78,7 +85,8 @@ DRIVERFILES += rlink.c rlink_speed_table.c
 endif
 if ULINK
 DRIVERFILES += ulink.c
-nobase_dist_ocddata_DATA += $(ULINK_FIRMWARE)/ulink_firmware.hex
+ulinkdir = $(pkgdatadir)/OpenULINK
+dist_ulink_DATA = $(ULINK_FIRMWARE)/ulink_firmware.hex
 endif
 if VSLLINK
 DRIVERFILES += versaloon/usbtoxxx/usbtogpio.c
@@ -117,6 +125,10 @@ endif
 
 if OPENJTAG
 DRIVERFILES += openjtag.c
+endif
+
+if CMSIS_DAP
+DRIVERFILES += cmsis_dap_usb.c
 endif
 
 noinst_HEADERS = \

@@ -3,6 +3,7 @@
 # build output
 .libs
 .deps
+.dirstamp
 *.o
 *.o.??????
 *.a
@@ -21,7 +22,7 @@ src/jtag/drivers/OpenULINK/*.lst
 src/jtag/drivers/OpenULINK/*.sym
 src/jtag/drivers/OpenULINK/*.map
 src/jtag/drivers/OpenULINK/*.mem
-src/jtag/drivers/OpenULINK/*.lnk
+src/jtag/drivers/OpenULINK/*.lk
 src/jtag/drivers/OpenULINK/*.ihx
 src/jtag/drivers/OpenULINK/*.rst
 
@@ -94,3 +95,6 @@ TAGS
 
 # CScope database files
 *cscope.out
+
+# ctags tag files
+tags

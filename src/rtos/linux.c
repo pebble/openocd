@@ -160,7 +160,7 @@ int fill_buffer(struct target *target, uint32_t addr, uint8_t *buffer)
 {
 
 	if ((addr & 0xfffffffc) != addr)
-		LOG_INFO("unaligned address %x!!", addr);
+		LOG_INFO("unaligned address %" PRIx32 "!!", addr);
 
 	int retval = linux_read_memory(target, addr, 4, 1, buffer);
 	return retval;
@@ -217,7 +217,7 @@ static int linux_os_thread_reg_list(struct rtos *rtos,
 		if (found == 0) {
 			LOG_ERROR
 			(
-				"current thread %" PRIx64 ": no target to perform access of core id %x",
+				"current thread %" PRIx64 ": no target to perform access of core id %" PRIx32,
 				thread_id,
 				next->core_id);
 			return ERROR_FAIL;
@@ -226,7 +226,8 @@ static int linux_os_thread_reg_list(struct rtos *rtos,
 		/*LOG_INFO("thread %lx current on core %x",thread_id,
 		 * target->coreid);*/
 		retval =
-			target_get_gdb_reg_list(target, &reg_list, &reg_list_size);
+			target_get_gdb_reg_list(target, &reg_list, &reg_list_size,
+					REG_CLASS_GENERAL);
 
 		if (retval != ERROR_OK)
 			return retval;
@@ -253,7 +254,7 @@ static int linux_os_thread_reg_list(struct rtos *rtos,
 
 	} else {
 		struct threads *temp = linux_os->thread_list;
-		*hex_reg_list = (char *)calloc(1, 500 * sizeof(char));
+		*hex_reg_list = calloc(1, 500 * sizeof(char));
 		hex_string = *hex_reg_list;
 
 		for (i = 0; i < 16; i++)
@@ -350,7 +351,7 @@ const struct rtos_type Linux_os = {
 	.ps_command = linux_ps_command,
 };
 
-static int linux_thread_packet(struct connection *connection, char *packet,
+static int linux_thread_packet(struct connection *connection, char const *packet,
 		int packet_size);
 static void linux_identify_current_threads(struct target *target);
 
@@ -498,7 +499,7 @@ int get_current(struct target *target, int create)
 		int retval;
 
 		if (target_get_gdb_reg_list(head->target, &reg_list,
-				&reg_list_size) != ERROR_OK) {
+				&reg_list_size, REG_CLASS_GENERAL) != ERROR_OK) {
 			free(buffer);
 			return ERROR_TARGET_FAILURE;
 		}
@@ -532,7 +533,7 @@ int get_current(struct target *target, int create)
 					LOG_ERROR
 						("error in linux current thread update");
 
-				if (create) {
+				if (create && ct) {
 					struct threads *t;
 					t = calloc(1, sizeof(struct threads));
 					t->base_addr = ct->TS;
@@ -1116,7 +1117,7 @@ static int linux_task_update(struct target *target, int context)
 }
 
 int linux_gdb_thread_packet(struct target *target,
-	struct connection *connection, char *packet,
+	struct connection *connection, char const *packet,
 	int packet_size)
 {
 	int retval;
@@ -1135,17 +1136,16 @@ int linux_gdb_thread_packet(struct target *target,
 	if (retval != ERROR_OK)
 		return ERROR_TARGET_FAILURE;
 
-	char *out_str = (char *)calloc(1, 350 * sizeof(int64_t));
+	char *out_str = calloc(1, 350 * sizeof(int64_t));
 	char *tmp_str = out_str;
 	tmp_str += sprintf(tmp_str, "m");
 	struct threads *temp = linux_os->thread_list;
-	tmp_str += sprintf(tmp_str, "%016" PRIx64, temp->threadid);
-	temp = temp->next;
 
 	while (temp != NULL) {
-		tmp_str += sprintf(tmp_str, ",");
 		tmp_str += sprintf(tmp_str, "%016" PRIx64, temp->threadid);
 		temp = temp->next;
+		if (temp)
+			tmp_str += sprintf(tmp_str, ",");
 	}
 
 	gdb_put_packet(connection, out_str, strlen(out_str));
@@ -1153,7 +1153,7 @@ int linux_gdb_thread_packet(struct target *target,
 }
 
 int linux_gdb_thread_update(struct target *target,
-	struct connection *connection, char *packet,
+	struct connection *connection, char const *packet,
 	int packet_size)
 {
 	int found = 0;
@@ -1172,7 +1172,7 @@ int linux_gdb_thread_update(struct target *target,
 
 	if (found == 1) {
 		/*LOG_INFO("INTO GDB THREAD UPDATE FOUNDING START TASK");*/
-		char *out_strr = (char *)calloc(1, 350 * sizeof(int64_t));
+		char *out_strr = calloc(1, 350 * sizeof(int64_t));
 		char *tmp_strr = out_strr;
 		tmp_strr += sprintf(tmp_strr, "m");
 		/*LOG_INFO("CHAR MALLOC & M DONE");*/
@@ -1200,7 +1200,7 @@ int linux_gdb_thread_update(struct target *target,
 }
 
 int linux_thread_extra_info(struct target *target,
-	struct connection *connection, char *packet,
+	struct connection *connection, char const *packet,
 	int packet_size)
 {
 	int64_t threadid = 0;
@@ -1216,7 +1216,7 @@ int linux_thread_extra_info(struct target *target,
 			char *pid_current = "*PID: ";
 			char *name = "NAME: ";
 			int str_size = strlen(pid) + strlen(name);
-			char *tmp_str = (char *)calloc(1, str_size + 50);
+			char *tmp_str = calloc(1, str_size + 50);
 			char *tmp_str_ptr = tmp_str;
 
 			/*  discriminate current task */
@@ -1231,7 +1231,7 @@ int linux_thread_extra_info(struct target *target,
 			tmp_str_ptr += sprintf(tmp_str_ptr, "%s", " | ");
 			sprintf(tmp_str_ptr, "%s", name);
 			sprintf(tmp_str_ptr, "%s", temp->name);
-			char *hex_str = (char *)calloc(1, strlen(tmp_str) * 2 + 1);
+			char *hex_str = calloc(1, strlen(tmp_str) * 2 + 1);
 			int pkt_len = hexify(hex_str, tmp_str, 0, strlen(tmp_str) * 2 + 1);
 			gdb_put_packet(connection, hex_str, pkt_len);
 			free(hex_str);
@@ -1247,7 +1247,7 @@ int linux_thread_extra_info(struct target *target,
 }
 
 int linux_gdb_T_packet(struct connection *connection,
-	struct target *target, char *packet, int packet_size)
+	struct target *target, char const *packet, int packet_size)
 {
 	int64_t threadid;
 	struct linux_os *linux_os = (struct linux_os *)
@@ -1308,7 +1308,7 @@ int linux_gdb_T_packet(struct connection *connection,
 }
 
 int linux_gdb_h_packet(struct connection *connection,
-	struct target *target, char *packet, int packet_size)
+	struct target *target, char const *packet, int packet_size)
 {
 	struct linux_os *linux_os = (struct linux_os *)
 		target->rtos->rtos_specific_params;
@@ -1376,7 +1376,7 @@ int linux_gdb_h_packet(struct connection *connection,
 	return ERROR_OK;
 }
 
-static int linux_thread_packet(struct connection *connection, char *packet,
+static int linux_thread_packet(struct connection *connection, char const *packet,
 	int packet_size)
 {
 	int retval = ERROR_OK;
@@ -1524,7 +1524,7 @@ static int linux_os_create(struct target *target)
 	os_linux->threads_needs_update = 0;
 	os_linux->threadid_count = 1;
 	os_linux->current_threads = NULL;
-	target->rtos->rtos_specific_params = (void *)os_linux;
+	target->rtos->rtos_specific_params = os_linux;
 	ct->core_id = target->coreid;
 	ct->threadid = -1;
 	ct->TS = 0xdeadbeef;
@@ -1571,14 +1571,14 @@ static char *linux_ps_command(struct target *target)
 				if (temp->context)
 					tmp +=
 						sprintf(tmp,
-							"%d\t\t%d\t\t%x\t\t%s\n",
-							(int)temp->pid, temp->oncpu,
+							"%" PRId32 "\t\t%" PRId32 "\t\t%" PRIx32 "\t\t%s\n",
+							temp->pid, temp->oncpu,
 							temp->asid, temp->name);
 				else
 					tmp +=
 						sprintf(tmp,
-							"%d\t\t%d\t\t%x\t\t%s\n",
-							(int)temp->pid, temp->oncpu,
+							"%" PRId32 "\t\t%" PRId32 "\t\t%" PRIx32 "\t\t%s\n",
+							temp->pid, temp->oncpu,
 							temp->asid, temp->name);
 			}
 
