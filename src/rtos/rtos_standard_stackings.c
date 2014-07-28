@@ -76,7 +76,7 @@ static const struct stack_register_offset rtos_standard_Cortex_R4_stack_offsets[
 
 /* Everything is offset 4 bytes from the standard arrangement because we also stack the control
  * register, which contains the thread mode privilege. */
-static const struct stack_register_offset rtos_standard_Cortex_M3_Pebble_stack_offsets[] = {
+static const struct stack_register_offset rtos_standard_Cortex_M3_Pebble_stack_offsets[ARMV7M_NUM_CORE_REGS] = {
 	{ 0x24, 32 },		/* r0   */
 	{ 0x28, 32 },		/* r1   */
 	{ 0x2c, 32 },		/* r2   */
@@ -93,15 +93,6 @@ static const struct stack_register_offset rtos_standard_Cortex_M3_Pebble_stack_o
 	{ -2,   32 },		/* sp   */
 	{ 0x38, 32 },		/* lr   */
 	{ 0x3c, 32 },		/* pc   */
-	{ -1,   96 },		/* FPA1 */
-	{ -1,   96 },		/* FPA2 */
-	{ -1,   96 },		/* FPA3 */
-	{ -1,   96 },		/* FPA4 */
-	{ -1,   96 },		/* FPA5 */
-	{ -1,   96 },		/* FPA6 */
-	{ -1,   96 },		/* FPA7 */
-	{ -1,   96 },		/* FPA8 */
-	{ -1,   32 },		/* FPS  */
 	{ 0x40, 32 },		/* xPSR */
 };
 
@@ -163,7 +154,7 @@ const struct rtos_register_stacking rtos_standard_Cortex_R4_stacking = {
 const struct rtos_register_stacking rtos_standard_Cortex_M3_Pebble_stacking = {
 	0x40,				/* stack_registers_size */
 	-1,					/* stack_growth_direction */
-	26,					/* num_output_registers */
+	ARMV7M_NUM_CORE_REGS,	/* num_output_registers */
 	8,					/* stack_alignment */
 	rtos_standard_Cortex_M3_Pebble_stack_offsets	/* register_offsets */
 };
