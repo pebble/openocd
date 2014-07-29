@@ -96,6 +96,27 @@ static const struct stack_register_offset rtos_standard_Cortex_M3_Pebble_stack_o
 	{ 0x40, 32 },		/* xPSR */
 };
 
+static const struct stack_register_offset rtos_standard_Cortex_M4_Pebble_stack_offsets[ARMV7M_NUM_CORE_REGS] = {
+	{ 0x28, 32 },		/* r0   */
+	{ 0x2c, 32 },		/* r1   */
+	{ 0x30, 32 },		/* r2   */
+	{ 0x34, 32 },		/* r3   */
+	{ 0x04, 32 },		/* r4   */
+	{ 0x08, 32 },		/* r5   */
+	{ 0x0c, 32 },		/* r6   */
+	{ 0x10, 32 },		/* r7   */
+	{ 0x14, 32 },		/* r8   */
+	{ 0x18, 32 },		/* r9   */
+	{ 0x1c, 32 },		/* r10  */
+	{ 0x20, 32 },		/* r11  */
+	{ 0x38, 32 },		/* r12  */
+	{ -2,   32 },		/* sp   */
+	{ 0x3c, 32 },		/* lr   */
+	{ 0x40, 32 },		/* pc   */
+	{ 0x44, 32 },		/* xPSR */
+};
+
+
 static const struct stack_register_offset rtos_standard_NDS32_N1068_stack_offsets[] = {
 	{ 0x88, 32 },		/* R0  */
 	{ 0x8C, 32 },		/* R1 */
@@ -152,11 +173,19 @@ const struct rtos_register_stacking rtos_standard_Cortex_R4_stacking = {
 };
 
 const struct rtos_register_stacking rtos_standard_Cortex_M3_Pebble_stacking = {
-	0x40,				/* stack_registers_size */
+	0x44,				/* stack_registers_size */
 	-1,					/* stack_growth_direction */
 	ARMV7M_NUM_CORE_REGS,	/* num_output_registers */
 	8,					/* stack_alignment */
 	rtos_standard_Cortex_M3_Pebble_stack_offsets	/* register_offsets */
+};
+
+const struct rtos_register_stacking rtos_standard_Cortex_M4_Pebble_stacking = {
+	0x48,				/* stack_registers_size */
+	-1,					/* stack_growth_direction */
+	ARMV7M_NUM_CORE_REGS,	/* num_output_registers */
+	8,					/* stack_alignment */
+	rtos_standard_Cortex_M4_Pebble_stack_offsets	/* register_offsets */
 };
 
 const struct rtos_register_stacking rtos_standard_NDS32_N1068_stacking = {

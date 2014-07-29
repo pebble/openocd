@@ -36,7 +36,6 @@
 #define Pebble_FreeRTOS_STRUCT(int_type, ptr_type, list_prev_offset)
 
 struct Pebble_FreeRTOS_params {
-	const char *target_name;
 	const unsigned char thread_count_width;
 	const unsigned char pointer_width;
 	const unsigned char list_next_offset;
@@ -48,9 +47,7 @@ struct Pebble_FreeRTOS_params {
 	const struct rtos_register_stacking *stacking_info;
 };
 
-const struct Pebble_FreeRTOS_params Pebble_FreeRTOS_params_list[] = {
-	{
-	"cortex_m",			/* target_name */
+const struct Pebble_FreeRTOS_params Pebble_FreeRTOS_stm32f2_params = {
 	4,						/* thread_count_width; */
 	4,						/* pointer_width; */
 	16,						/* list_next_offset; */
@@ -60,7 +57,18 @@ const struct Pebble_FreeRTOS_params Pebble_FreeRTOS_params_list[] = {
 	0,						/* thread_stack_offset; */
 	84,						/* thread_name_offset; */
 	&rtos_standard_Cortex_M3_Pebble_stacking,	/* stacking_info */
-    }
+};
+
+const struct Pebble_FreeRTOS_params Pebble_FreeRTOS_stm32f4_params = {
+	4,						/* thread_count_width; */
+	4,						/* pointer_width; */
+	16,						/* list_next_offset; */
+	20,						/* list_width; */
+	8,						/* list_elem_next_offset; */
+	12,						/* list_elem_content_offset */
+	0,						/* thread_stack_offset; */
+	84,						/* thread_name_offset; */
+	&rtos_standard_Cortex_M4_Pebble_stacking,	/* stacking_info */
 };
 
 #define PEBBLE_FREERTOS_NUM_PARAMS ((int)(sizeof(Pebble_FreeRTOS_params_list)/sizeof(struct Pebble_FreeRTOS_params)))
@@ -417,16 +425,16 @@ static int Pebble_FreeRTOS_detect_rtos(struct target *target)
 
 static int Pebble_FreeRTOS_create(struct target *target)
 {
-	int i = 0;
-	while ((i < PEBBLE_FREERTOS_NUM_PARAMS) &&
-			(0 != strcmp(Pebble_FreeRTOS_params_list[i].target_name, target->type->name))) {
-		i++;
-	}
-	if (i >= PEBBLE_FREERTOS_NUM_PARAMS) {
-		LOG_ERROR("Could not find target in Pebble_FreeRTOS compatibility list");
-		return -1;
+	if (strcmp(target->cmd_name, "stm32f4x.cpu") == 0) {
+		target->rtos->rtos_specific_params = &Pebble_FreeRTOS_stm32f4_params;
+		return 0;
 	}
 
-	target->rtos->rtos_specific_params = (void *) &Pebble_FreeRTOS_params_list[i];
-	return 0;
+	if (strcmp(target->type->name, "cortex_m") == 0) {
+		target->rtos->rtos_specific_params = &Pebble_FreeRTOS_stm32f2_params;
+		return 0;
+	}
+
+	LOG_ERROR("Could not find target in Pebble_FreeRTOS compatibility list");
+	return -1;
 }
