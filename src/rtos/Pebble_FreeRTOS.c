@@ -426,12 +426,12 @@ static int Pebble_FreeRTOS_detect_rtos(struct target *target)
 static int Pebble_FreeRTOS_create(struct target *target)
 {
 	if (strcmp(target->cmd_name, "stm32f4x.cpu") == 0) {
-		target->rtos->rtos_specific_params = &Pebble_FreeRTOS_stm32f4_params;
+		target->rtos->rtos_specific_params = (void *)&Pebble_FreeRTOS_stm32f4_params;
 		return 0;
 	}
 
 	if (strcmp(target->type->name, "cortex_m") == 0) {
-		target->rtos->rtos_specific_params = &Pebble_FreeRTOS_stm32f2_params;
+		target->rtos->rtos_specific_params = (void *)&Pebble_FreeRTOS_stm32f2_params;
 		return 0;
 	}
 
