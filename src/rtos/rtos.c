@@ -30,6 +30,7 @@
 
 /* RTOSs */
 extern struct rtos_type FreeRTOS_rtos;
+extern struct rtos_type Pebble_FreeRTOS_rtos;
 extern struct rtos_type ThreadX_rtos;
 extern struct rtos_type eCos_rtos;
 extern struct rtos_type Linux_os;
@@ -39,6 +40,7 @@ extern struct rtos_type embKernel_rtos;
 static struct rtos_type *rtos_types[] = {
 	&ThreadX_rtos,
 	&FreeRTOS_rtos,
+        &Pebble_FreeRTOS_rtos,
 	&eCos_rtos,
 	&Linux_os,
 	&ChibiOS_rtos,
@@ -115,7 +117,7 @@ int rtos_create(Jim_GetOptInfo *goi, struct target *target)
 	Jim_GetOpt_String(goi, &cp, NULL);
 
 	if (0 == strcmp(cp, "auto")) {
-		/* Auto detect tries to look up all symbols for each RTOS,
+          /* Auto detect tries to look up all symbols for each RTOS,
 		 * and runs the RTOS driver's _detect() function when GDB
 		 * finds all symbols for any RTOS. See rtos_qsymbol(). */
 		target->rtos_auto_detect = true;
@@ -456,6 +458,7 @@ int rtos_generic_stack_read(struct target *target,
 
 	if (stacking->stack_growth_direction == 1)
 		address -= stacking->stack_registers_size;
+
 	retval = target_read_buffer(target, address, stacking->stack_registers_size, stack_data);
 	if (retval != ERROR_OK) {
 		free(stack_data);
@@ -474,12 +477,17 @@ int rtos_generic_stack_read(struct target *target,
 	tmp_str_ptr = *hex_reg_list;
 	new_stack_ptr = stack_ptr - stacking->stack_growth_direction *
 		stacking->stack_registers_size;
+
 	if (stacking->stack_alignment != 0) {
 		/* Align new stack pointer to x byte boundary */
-		new_stack_ptr =
+          if ((new_stack_ptr % (stacking->stack_alignment)) != 0) {
+                new_stack_ptr =
 			(new_stack_ptr & (~((int64_t) stacking->stack_alignment - 1))) +
 			((stacking->stack_growth_direction == -1) ? stacking->stack_alignment : 0);
+                LOG_OUTPUT("--->Aligning Stack!");
+          }
 	}
+
 	for (i = 0; i < stacking->num_output_registers; i++) {
 		int j;
 		for (j = 0; j < stacking->register_offsets[i].width_bits/8; j++) {
