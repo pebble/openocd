@@ -484,7 +484,6 @@ int rtos_generic_stack_read(struct target *target,
                 new_stack_ptr =
 			(new_stack_ptr & (~((int64_t) stacking->stack_alignment - 1))) +
 			((stacking->stack_growth_direction == -1) ? stacking->stack_alignment : 0);
-                LOG_OUTPUT("--->Aligning Stack!");
           }
 	}
 
