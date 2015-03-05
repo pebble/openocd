@@ -58,7 +58,7 @@ const struct Pebble_FreeRTOS_params Pebble_FreeRTOS_params_list[] = {
 	8,						/* list_elem_next_offset; */
 	12,						/* list_elem_content_offset */
 	0,						/* thread_stack_offset; */
-	84,						/* thread_name_offset; */
+	92,						/* thread_name_offset; */
 	&rtos_standard_Cortex_M4_Pebble_stacking,						/* stacking_info */
         },
         {
