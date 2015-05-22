@@ -45,12 +45,14 @@ struct Pebble_FreeRTOS_params {
 	const unsigned char list_elem_content_offset;
 	const unsigned char thread_stack_offset;
 	const unsigned char thread_name_offset;
+	const int stack_saved_r14_offset;
 	const struct rtos_register_stacking *stacking_info;
+	const struct rtos_register_stacking *stacking_info_fp;
 };
 
 const struct Pebble_FreeRTOS_params Pebble_FreeRTOS_params_list[] = {
 	{
-	"stm32f4x.cpu",			                /* target_name */
+	"stm32f4x.cpu",			/* target_name */
 	4,						/* thread_count_width; */
 	4,						/* pointer_width; */
 	16,						/* list_next_offset; */
@@ -59,10 +61,13 @@ const struct Pebble_FreeRTOS_params Pebble_FreeRTOS_params_list[] = {
 	12,						/* list_elem_content_offset */
 	0,						/* thread_stack_offset; */
 	92,						/* thread_name_offset; */
+	36,                     /* offset to exc return r14 from the thread's stack pointer */
 	&rtos_standard_Cortex_M4_Pebble_stacking,						/* stacking_info */
-        },
-        {
-        "stm32f2x.cpu",			                /* target_name */
+	&rtos_standard_Cortex_M4_Pebble_stacking_with_fp,				/* stacking_info with FP*/
+	},
+
+	{
+	"stm32f2x.cpu",			/* target_name */
 	4,						/* thread_count_width; */
 	4,						/* pointer_width; */
 	16,						/* list_next_offset; */
@@ -71,7 +76,9 @@ const struct Pebble_FreeRTOS_params Pebble_FreeRTOS_params_list[] = {
 	12,						/* list_elem_content_offset */
 	0,						/* thread_stack_offset; */
 	84,						/* thread_name_offset; */
+	-1,                     /* no exc return r14 saved on thread's stack pointer */
 	&rtos_standard_Cortex_M3_Pebble_stacking,						/* stacking_info */
+	&rtos_standard_Cortex_M3_Pebble_stacking,						/* not used */
 	}
 };
 
@@ -357,6 +364,7 @@ static int Pebble_FreeRTOS_get_thread_reg_list(struct rtos *rtos, int64_t thread
 	int retval;
 	const struct Pebble_FreeRTOS_params *param;
 	int64_t stack_ptr = 0;
+	const struct rtos_register_stacking *stacking_info_p;
 
 	*hex_reg_list = NULL;
 	if (rtos == NULL)
@@ -376,13 +384,32 @@ static int Pebble_FreeRTOS_get_thread_reg_list(struct rtos *rtos, int64_t thread
 			param->pointer_width,
 			(uint8_t *)&stack_ptr);
 
-
 	if (retval != ERROR_OK) {
 		LOG_ERROR("Error reading stack frame from Pebble_FreeRTOS thread");
 		return retval;
 	}
+	stacking_info_p = param->stacking_info;
 
-	return rtos_generic_stack_read(rtos->target, param->stacking_info, stack_ptr, hex_reg_list);
+	// See if floating point is being used by checking bit 4 of the saved r14 on the stack
+	if (param->stack_saved_r14_offset > 0) {
+		int64_t exc_ret_r14;
+		retval = target_read_buffer(rtos->target,
+				stack_ptr + param->stack_saved_r14_offset,
+				param->pointer_width,
+				(uint8_t *)&exc_ret_r14);
+
+		if (retval != ERROR_OK) {
+			LOG_ERROR("Error reading exception return r14 frame from Pebble_FreeRTOS thread");
+			return retval;
+		}
+
+		if ((exc_ret_r14 & 0x10) == 0) {
+			// if bit 4 on the exception return r14 is 0, it means we have FP registers stacked
+			stacking_info_p = param->stacking_info_fp;
+		}
+	}
+
+	return rtos_generic_stack_read(rtos->target, stacking_info_p, stack_ptr, hex_reg_list);
 }
 
 static int Pebble_FreeRTOS_get_symbol_list_to_lookup(symbol_table_elem_t *symbol_list[])
