@@ -655,17 +655,14 @@ static int ftdi_initialize(void)
 
 	freq = mpsse_set_frequency(mpsse_ctx, jtag_get_speed_khz() * 1000);
 
-	if (swd_mode)
-		ftdi_swd_switch_seq(NULL, JTAG_TO_SWD);
-	else
-		ftdi_swd_switch_seq(NULL, SWD_TO_JTAG);
-
 	return mpsse_flush(mpsse_ctx);
 }
 
 static int ftdi_quit(void)
 {
 	mpsse_close(mpsse_ctx);
+
+	free(swd_cmd_queue);
 
 	return ERROR_OK;
 }
@@ -970,7 +967,7 @@ static int ftdi_swd_run_queue(struct adiv5_dap *dap)
 	}
 
 	for (size_t i = 0; i < swd_cmd_queue_length; i++) {
-		int ack = buf_get_u32(&swd_cmd_queue[i].trn_ack_data_parity_trn, 1, 3);
+		int ack = buf_get_u32(swd_cmd_queue[i].trn_ack_data_parity_trn, 1, 3);
 
 		LOG_DEBUG("%s %s %s reg %X = %08"PRIx32,
 				ack == SWD_ACK_OK ? "OK" : ack == SWD_ACK_WAIT ? "WAIT" : ack == SWD_ACK_FAULT ? "FAULT" : "JUNK",
@@ -981,7 +978,7 @@ static int ftdi_swd_run_queue(struct adiv5_dap *dap)
 						1 + 3 + (swd_cmd_queue[i].cmd & SWD_CMD_RnW ? 0 : 1), 32));
 
 		if (ack != SWD_ACK_OK) {
-			queued_retval = ack;
+			queued_retval = ack == SWD_ACK_WAIT ? ERROR_WAIT : ERROR_FAIL;
 			goto skip;
 
 		} else if (swd_cmd_queue[i].cmd & SWD_CMD_RnW) {

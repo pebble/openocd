@@ -1,5 +1,5 @@
 AC_PREREQ(2.64)
-AC_INIT([openocd], [0.9.0-pebble-dev],
+AC_INIT([openocd], [0.9.0],
   [OpenOCD Mailing List <openocd-devel@lists.sourceforge.net>])
 AC_CONFIG_SRCDIR([src/openocd.c])
 
@@ -622,6 +622,10 @@ case $host in
     AC_DEFINE([IS_DARWIN], [0], [0 if not building for Darwin.])
     ;;
 esac
+
+if test $is_win32 = yes; then
+    AC_DEFINE([WIN32_LEAN_AND_MEAN], [1], [1 to exclude old conflicting definitions when building on Windows])
+fi
 
 if test $build_parport = yes; then
   build_bitbang=yes

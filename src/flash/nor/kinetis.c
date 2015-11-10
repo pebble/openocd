@@ -31,6 +31,7 @@
 #include "config.h"
 #endif
 
+#include "jtag/interface.h"
 #include "imp.h"
 #include <helper/binarybuffer.h>
 #include <target/algorithm.h>
@@ -313,6 +314,14 @@ COMMAND_HANDLER(kinetis_mdm_mass_erase)
 	 * Reset Request bit in the MDM-AP control register after
 	 * establishing communication...
 	 */
+
+	/* assert SRST */
+	if (jtag_get_reset_config() & RESET_HAS_SRST)
+		adapter_assert_reset();
+	else
+		LOG_WARNING("Attempting mass erase without hardware reset. This is not reliable; "
+			    "it's recommended you connect SRST and use ``reset_config srst_only''.");
+
 	dap_ap_select(dap, 1);
 
 	retval = kinetis_mdm_write_register(dap, MDM_REG_CTRL, MEM_CTRL_SYS_RES_REQ);
@@ -363,6 +372,9 @@ COMMAND_HANDLER(kinetis_mdm_mass_erase)
 	retval = kinetis_mdm_write_register(dap, MDM_REG_CTRL, 0);
 	if (retval != ERROR_OK)
 		return retval;
+
+	if (jtag_get_reset_config() & RESET_HAS_SRST)
+		adapter_deassert_reset();
 
 	dap_ap_select(dap, original_ap);
 	return ERROR_OK;
@@ -448,10 +460,10 @@ COMMAND_HANDLER(kinetis_check_flash_security_status)
 		LOG_WARNING("*********** ATTENTION! ATTENTION! ATTENTION! ATTENTION! **********");
 		LOG_WARNING("****                                                          ****");
 		LOG_WARNING("**** Your Kinetis MCU is in secured state, which means that,  ****");
-		LOG_WARNING("**** with exeption for very basic communication, JTAG/SWD     ****");
+		LOG_WARNING("**** with exception for very basic communication, JTAG/SWD    ****");
 		LOG_WARNING("**** interface will NOT work. In order to restore its         ****");
 		LOG_WARNING("**** functionality please issue 'kinetis mdm mass_erase'      ****");
-		LOG_WARNING("**** command, power cycle the MCU and restart openocd.        ****");
+		LOG_WARNING("**** command, power cycle the MCU and restart OpenOCD.        ****");
 		LOG_WARNING("****                                                          ****");
 		LOG_WARNING("*********** ATTENTION! ATTENTION! ATTENTION! ATTENTION! **********");
 	} else {
@@ -785,20 +797,6 @@ static int kinetis_ftfx_command(struct flash_bank *bank, uint8_t fcmd, uint32_t 
 	return ERROR_OK;
 }
 
-static int kinetis_mass_erase(struct flash_bank *bank)
-{
-	uint8_t ftfx_fstat;
-
-	if (bank->target->state != TARGET_HALTED) {
-		LOG_ERROR("Target not halted");
-		return ERROR_TARGET_NOT_HALTED;
-	}
-
-	LOG_INFO("Execute Erase All Blocks");
-	return kinetis_ftfx_command(bank, FTFx_CMD_MASSERASE, 0,
-				    0, 0, 0, 0,  0, 0, 0, 0,  &ftfx_fstat);
-}
-
 COMMAND_HANDLER(kinetis_securing_test)
 {
 	int result;
@@ -832,9 +830,6 @@ static int kinetis_erase(struct flash_bank *bank, int first, int last)
 
 	if ((first > bank->num_sectors) || (last > bank->num_sectors))
 		return ERROR_FLASH_OPERATION_FAILED;
-
-	if ((first == 0) && (last == (bank->num_sectors - 1)))
-		return kinetis_mass_erase(bank);
 
 	/*
 	 * FIXME: TODO: use the 'Erase Flash Block' command if the

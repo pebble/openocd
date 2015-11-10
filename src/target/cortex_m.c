@@ -61,6 +61,7 @@
 /* forward declarations */
 static int cortex_m_store_core_reg_u32(struct target *target,
 		uint32_t num, uint32_t value);
+static void cortex_m_dwt_free(struct target *target);
 
 static int cortexm_dap_read_coreregister_u32(struct target *target,
 	uint32_t *value, int regnum)
@@ -473,7 +474,7 @@ static int cortex_m_debug_entry(struct target *target)
 
 	LOG_DEBUG("entered debug state in core mode: %s at PC 0x%" PRIx32 ", target->state: %s",
 		arm_mode_name(arm->core_mode),
-		*(uint32_t *)(arm->pc->value),
+		buf_get_u32(arm->pc->value, 0, 32),
 		target_state_name(target));
 
 	if (armv7m->post_debug_entry) {
@@ -1052,12 +1053,6 @@ static int cortex_m_assert_reset(struct target *target)
 		 * This has the disadvantage of not resetting the peripherals, so a
 		 * reset-init event handler is needed to perform any peripheral resets.
 		 */
-		retval = mem_ap_write_atomic_u32(swjdp, NVIC_AIRCR,
-				AIRCR_VECTKEY | ((reset_config == CORTEX_M_RESET_SYSRESETREQ)
-				? AIRCR_SYSRESETREQ : AIRCR_VECTRESET));
-		if (retval != ERROR_OK)
-			return retval;
-
 		LOG_DEBUG("Using Cortex-M %s", (reset_config == CORTEX_M_RESET_SYSRESETREQ)
 			? "SYSRESETREQ" : "VECTRESET");
 
@@ -1066,17 +1061,16 @@ static int cortex_m_assert_reset(struct target *target)
 				"handler to reset any peripherals or configure hardware srst support.");
 		}
 
-		/*
-		  SAM4L needs to execute security initalization
-		  startup sequence before AP access would be enabled.
-		  During the intialization CDBGPWRUPACK is pulled low and we
-		  need to wait for it to be set to 1 again.
-		*/
-		retval = dap_dp_poll_register(swjdp, DP_CTRL_STAT,
-					      CDBGPWRUPACK, CDBGPWRUPACK, 100);
+		retval = mem_ap_write_atomic_u32(swjdp, NVIC_AIRCR,
+				AIRCR_VECTKEY | ((reset_config == CORTEX_M_RESET_SYSRESETREQ)
+				? AIRCR_SYSRESETREQ : AIRCR_VECTRESET));
+		if (retval != ERROR_OK)
+			LOG_DEBUG("Ignoring AP write error right after reset");
+
+		retval = ahbap_debugport_init(swjdp);
 		if (retval != ERROR_OK) {
-			LOG_ERROR("Failed waitnig for CDBGPWRUPACK");
-			return ERROR_FAIL;
+			LOG_ERROR("DP initialisation failed");
+			return retval;
 		}
 
 		{
@@ -1112,6 +1106,17 @@ static int cortex_m_deassert_reset(struct target *target)
 
 	/* deassert reset lines */
 	adapter_deassert_reset();
+
+	enum reset_types jtag_reset_config = jtag_get_reset_config();
+
+	if ((jtag_reset_config & RESET_HAS_SRST) &&
+	    !(jtag_reset_config & RESET_SRST_NO_GATING)) {
+		int retval = ahbap_debugport_init(target_to_cm(target)->armv7m.arm.dap);
+		if (retval != ERROR_OK) {
+			LOG_ERROR("DP initialisation failed");
+			return retval;
+		}
+	}
 
 	return ERROR_OK;
 }
@@ -1498,6 +1503,29 @@ static int cortex_m_load_core_reg_u32(struct target *target,
 			LOG_DEBUG("load from core reg %i  value 0x%" PRIx32 "", (int)num, *value);
 			break;
 
+		case ARMV7M_FPSCR:
+			/* Floating-point Status and Registers */
+			retval = target_write_u32(target, DCB_DCRSR, 0x21);
+			if (retval != ERROR_OK)
+				return retval;
+			retval = target_read_u32(target, DCB_DCRDR, value);
+			if (retval != ERROR_OK)
+				return retval;
+			LOG_DEBUG("load from FPSCR  value 0x%" PRIx32, *value);
+			break;
+
+		case ARMV7M_S0 ... ARMV7M_S31:
+			/* Floating-point Status and Registers */
+			retval = target_write_u32(target, DCB_DCRSR, num - ARMV7M_S0 + 0x40);
+			if (retval != ERROR_OK)
+				return retval;
+			retval = target_read_u32(target, DCB_DCRDR, value);
+			if (retval != ERROR_OK)
+				return retval;
+			LOG_DEBUG("load from FPU reg S%d  value 0x%" PRIx32,
+				  (int)(num - ARMV7M_S0), *value);
+			break;
+
 		case ARMV7M_PRIMASK:
 		case ARMV7M_BASEPRI:
 		case ARMV7M_FAULTMASK:
@@ -1559,6 +1587,29 @@ static int cortex_m_store_core_reg_u32(struct target *target,
 				return ERROR_JTAG_DEVICE_ERROR;
 			}
 			LOG_DEBUG("write core reg %i value 0x%" PRIx32 "", (int)num, value);
+			break;
+
+		case ARMV7M_FPSCR:
+			/* Floating-point Status and Registers */
+			retval = target_write_u32(target, DCB_DCRDR, value);
+			if (retval != ERROR_OK)
+				return retval;
+			retval = target_write_u32(target, DCB_DCRSR, 0x21 | (1<<16));
+			if (retval != ERROR_OK)
+				return retval;
+			LOG_DEBUG("write FPSCR value 0x%" PRIx32, value);
+			break;
+
+		case ARMV7M_S0 ... ARMV7M_S31:
+			/* Floating-point Status and Registers */
+			retval = target_write_u32(target, DCB_DCRDR, value);
+			if (retval != ERROR_OK)
+				return retval;
+			retval = target_write_u32(target, DCB_DCRSR, (num - ARMV7M_S0 + 0x40) | (1<<16));
+			if (retval != ERROR_OK)
+				return retval;
+			LOG_DEBUG("write FPU reg S%d  value 0x%" PRIx32,
+				  (int)(num - ARMV7M_S0), value);
 			break;
 
 		case ARMV7M_PRIMASK:
@@ -1638,6 +1689,15 @@ static int cortex_m_init_target(struct command_context *cmd_ctx,
 	return ERROR_OK;
 }
 
+void cortex_m_deinit_target(struct target *target)
+{
+	struct cortex_m_common *cortex_m = target_to_cm(target);
+
+	free(cortex_m->fp_comparator_list);
+	cortex_m_dwt_free(target);
+	free(cortex_m);
+}
+
 /* REVISIT cache valid/dirty bits are unmaintained.  We could set "valid"
  * on r/w if the core is not running, and clear on resume or reset ... or
  * at least, in a post_restore_context() method.
@@ -1646,14 +1706,20 @@ static int cortex_m_init_target(struct command_context *cmd_ctx,
 struct dwt_reg_state {
 	struct target *target;
 	uint32_t addr;
-	uint32_t value;		/* scratch/cache */
+	uint8_t value[4];		/* scratch/cache */
 };
 
 static int cortex_m_dwt_get_reg(struct reg *reg)
 {
 	struct dwt_reg_state *state = reg->arch_info;
 
-	return target_read_u32(state->target, state->addr, &state->value);
+	uint32_t tmp;
+	int retval = target_read_u32(state->target, state->addr, &tmp);
+	if (retval != ERROR_OK)
+		return retval;
+
+	buf_set_u32(state->value, 0, 32, tmp);
+	return ERROR_OK;
 }
 
 static int cortex_m_dwt_set_reg(struct reg *reg, uint8_t *buf)
@@ -1708,7 +1774,7 @@ static void cortex_m_dwt_addreg(struct target *t, struct reg *r, struct dwt_reg 
 
 	r->name = d->name;
 	r->size = d->size;
-	r->value = &state->value;
+	r->value = state->value;
 	r->arch_info = state;
 	r->type = &dwt_reg_type;
 }
@@ -1781,6 +1847,27 @@ fail1:
 	 */
 }
 
+static void cortex_m_dwt_free(struct target *target)
+{
+	struct cortex_m_common *cm = target_to_cm(target);
+	struct reg_cache *cache = cm->dwt_cache;
+
+	free(cm->dwt_comparator_list);
+	cm->dwt_comparator_list = NULL;
+
+	if (cache) {
+		register_unlink_cache(&target->reg_cache, cache);
+
+		if (cache->reg_list) {
+			for (size_t i = 0; i < cache->num_regs; i++)
+				free(cache->reg_list[i].arch_info);
+			free(cache->reg_list);
+		}
+		free(cache);
+	}
+	cm->dwt_cache = NULL;
+}
+
 #define MVFR0 0xe000ef40
 #define MVFR1 0xe000ef44
 
@@ -1833,9 +1920,30 @@ int cortex_m_examine(struct target *target)
 			armv7m->arm.is_armv6m = true;
 		}
 
+		if (armv7m->fp_feature != FPv4_SP &&
+		    armv7m->arm.core_cache->num_regs > ARMV7M_NUM_CORE_REGS_NOFP) {
+			/* free unavailable FPU registers */
+			size_t idx;
+			for (idx = ARMV7M_NUM_CORE_REGS_NOFP;
+			     idx < armv7m->arm.core_cache->num_regs;
+			     idx++)
+				free(armv7m->arm.core_cache->reg_list[idx].value);
+			armv7m->arm.core_cache->num_regs = ARMV7M_NUM_CORE_REGS_NOFP;
+		}
+
 		if (i == 4 || i == 3) {
 			/* Cortex-M3/M4 has 4096 bytes autoincrement range */
 			armv7m->dap.tar_autoincr_block = (1 << 12);
+		}
+
+		/* Configure trace modules */
+		retval = target_write_u32(target, DCB_DEMCR, TRCENA | armv7m->demcr);
+		if (retval != ERROR_OK)
+			return retval;
+
+		if (armv7m->trace_config.config_type != DISABLED) {
+			armv7m_trace_tpiu_config(target);
+			armv7m_trace_itm_config(target);
 		}
 
 		/* NOTE: FPB and DWT are both optional. */
@@ -1847,6 +1955,7 @@ int cortex_m_examine(struct target *target)
 		cortex_m->fp_num_code = ((fpcr >> 8) & 0x70) | ((fpcr >> 4) & 0xF);
 		cortex_m->fp_num_lit = (fpcr >> 8) & 0xF;
 		cortex_m->fp_code_available = cortex_m->fp_num_code;
+		free(cortex_m->fp_comparator_list);
 		cortex_m->fp_comparator_list = calloc(
 				cortex_m->fp_num_code + cortex_m->fp_num_lit,
 				sizeof(struct cortex_m_fp_comparator));
@@ -1865,6 +1974,7 @@ int cortex_m_examine(struct target *target)
 			cortex_m->fp_num_lit);
 
 		/* Setup DWT */
+		cortex_m_dwt_free(target);
 		cortex_m_dwt_setup(cortex_m, target);
 
 		/* These hardware breakpoints only work for code in flash! */
@@ -2229,6 +2339,9 @@ static const struct command_registration cortex_m_command_handlers[] = {
 		.chain = armv7m_command_handlers,
 	},
 	{
+		.chain = armv7m_trace_command_handlers,
+	},
+	{
 		.name = "cortex_m",
 		.mode = COMMAND_EXEC,
 		.help = "Cortex-M command group",
@@ -2275,4 +2388,5 @@ struct target_type cortexm_target = {
 	.target_create = cortex_m_target_create,
 	.init_target = cortex_m_init_target,
 	.examine = cortex_m_examine,
+	.deinit_target = cortex_m_deinit_target,
 };

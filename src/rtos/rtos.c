@@ -36,6 +36,7 @@ extern struct rtos_type eCos_rtos;
 extern struct rtos_type Linux_os;
 extern struct rtos_type ChibiOS_rtos;
 extern struct rtos_type embKernel_rtos;
+extern struct rtos_type mqx_rtos;
 
 static struct rtos_type *rtos_types[] = {
 	&ThreadX_rtos,
@@ -45,6 +46,7 @@ static struct rtos_type *rtos_types[] = {
 	&Linux_os,
 	&ChibiOS_rtos,
 	&embKernel_rtos,
+	&mqx_rtos,
 	NULL
 };
 
@@ -305,7 +307,7 @@ int rtos_thread_packet(struct connection *connection, char const *packet, int pa
 			if (detail->extra_info_str != NULL)
 				str_size += strlen(detail->extra_info_str);
 
-			char *tmp_str = malloc(str_size + 7);
+			char *tmp_str = calloc(str_size + 7, sizeof(char));
 			char *tmp_str_ptr = tmp_str;
 
 			if (detail->display_str != NULL)
@@ -406,8 +408,11 @@ int rtos_thread_packet(struct connection *connection, char const *packet, int pa
 		return ERROR_OK;
 	} else if (packet[0] == 'H') {	/* Set current thread ( 'c' for step and continue, 'g' for
 					 * all other operations ) */
-		if ((packet[1] == 'g') && (target->rtos != NULL))
+		if ((packet[1] == 'g') && (target->rtos != NULL)) {
 			sscanf(packet, "Hg%16" SCNx64, &target->rtos->current_threadid);
+			LOG_DEBUG("RTOS: GDB requested to set current thread to 0x%" PRIx64 "\r\n",
+										target->rtos->current_threadid);
+		}
 		gdb_put_packet(connection, "OK", 2);
 		return ERROR_OK;
 	}
@@ -424,6 +429,12 @@ int rtos_get_gdb_reg_list(struct connection *connection)
 			((current_threadid != target->rtos->current_thread) ||
 			(target->smp))) {	/* in smp several current thread are possible */
 		char *hex_reg_list;
+
+		LOG_DEBUG("RTOS: getting register list for thread 0x%" PRIx64
+				  ", target->rtos->current_thread=0x%" PRIx64 "\r\n",
+										current_threadid,
+										target->rtos->current_thread);
+
 		target->rtos->type->get_thread_reg_list(target->rtos,
 			current_threadid,
 			&hex_reg_list);
@@ -465,6 +476,8 @@ int rtos_generic_stack_read(struct target *target,
 		LOG_ERROR("Error reading stack frame from thread");
 		return retval;
 	}
+	LOG_DEBUG("RTOS: Read stack frame at 0x%" PRIx32, address);
+
 #if 0
 		LOG_OUTPUT("Stack Data :");
 		for (i = 0; i < stacking->stack_registers_size; i++)
