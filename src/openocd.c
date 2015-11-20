@@ -277,30 +277,36 @@ static int openocd_thread(int argc, char *argv[], struct command_context *cmd_ct
 	int ret;
 
 	if (parse_cmdline_args(cmd_ctx, argc, argv) != ERROR_OK)
-		return EXIT_FAILURE;
+		return ERROR_FAIL;
 
 	if (server_preinit() != ERROR_OK)
-		return EXIT_FAILURE;
+		return ERROR_FAIL;
 
 	ret = parse_config_file(cmd_ctx);
-	if (ret != ERROR_OK)
-		return EXIT_FAILURE;
+	if (ret == ERROR_COMMAND_CLOSE_CONNECTION)
+		return ERROR_OK;
+	else if (ret != ERROR_OK)
+		return ERROR_FAIL;
 
 	ret = server_init(cmd_ctx);
 	if (ERROR_OK != ret)
-		return EXIT_FAILURE;
+		return ERROR_FAIL;
 
 	if (init_at_startup) {
 		ret = command_run_line(cmd_ctx, "init");
 		if (ERROR_OK != ret)
-			return EXIT_FAILURE;
+			return ERROR_FAIL;
 	}
 
-	server_loop(cmd_ctx);
+	ret = server_loop(cmd_ctx);
 
-	server_quit();
+	int last_signal = server_quit();
+	if (last_signal != ERROR_OK)
+		return last_signal;
 
-	return ret;
+	if (ret != ERROR_OK)
+		return ERROR_FAIL;
+	return ERROR_OK;
 }
 
 /* normally this is the main() function entry, but if OpenOCD is linked
@@ -322,7 +328,7 @@ int openocd_main(int argc, char *argv[])
 		return EXIT_FAILURE;
 
 	LOG_OUTPUT("For bug reports, read\n\t"
-		"http://openocd.sourceforge.net/doc/doxygen/bugs.html"
+		"http://openocd.org/doc/doxygen/bugs.html"
 		"\n");
 
 	command_context_mode(cmd_ctx, COMMAND_CONFIG);
@@ -337,6 +343,11 @@ int openocd_main(int argc, char *argv[])
 	command_done(cmd_ctx);
 
 	adapter_quit();
+
+	if (ERROR_FAIL == ret)
+		return EXIT_FAILURE;
+	else if (ERROR_OK != ret)
+		exit_on_signal(ret);
 
 	return ret;
 }

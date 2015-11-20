@@ -642,6 +642,8 @@ extern const struct dap_ops jtag_dp_ops;
  */
 int ahbap_debugport_init(struct adiv5_dap *dap)
 {
+	/* check that we support packed transfers */
+	uint32_t csw, cfg;
 	int retval;
 
 	LOG_DEBUG(" ");
@@ -663,70 +665,74 @@ int ahbap_debugport_init(struct adiv5_dap *dap)
 	dap_ap_select(dap, 0);
 	dap->last_read = NULL;
 
-	/* DP initialization */
+	for (size_t i = 0; i < 10; i++) {
+		/* DP initialization */
 
-	dap->dp_bank_value = 0;
+		dap->dp_bank_value = 0;
 
-	retval = dap_queue_dp_read(dap, DP_CTRL_STAT, NULL);
-	if (retval != ERROR_OK)
-		return retval;
+		retval = dap_queue_dp_read(dap, DP_CTRL_STAT, NULL);
+		if (retval != ERROR_OK)
+			continue;
 
-	retval = dap_queue_dp_write(dap, DP_CTRL_STAT, SSTICKYERR);
-	if (retval != ERROR_OK)
-		return retval;
+		retval = dap_queue_dp_write(dap, DP_CTRL_STAT, SSTICKYERR);
+		if (retval != ERROR_OK)
+			continue;
 
-	retval = dap_queue_dp_read(dap, DP_CTRL_STAT, NULL);
-	if (retval != ERROR_OK)
-		return retval;
+		retval = dap_queue_dp_read(dap, DP_CTRL_STAT, NULL);
+		if (retval != ERROR_OK)
+			continue;
 
-	dap->dp_ctrl_stat = CDBGPWRUPREQ | CSYSPWRUPREQ;
-	retval = dap_queue_dp_write(dap, DP_CTRL_STAT, dap->dp_ctrl_stat);
-	if (retval != ERROR_OK)
-		return retval;
+		dap->dp_ctrl_stat = CDBGPWRUPREQ | CSYSPWRUPREQ;
+		retval = dap_queue_dp_write(dap, DP_CTRL_STAT, dap->dp_ctrl_stat);
+		if (retval != ERROR_OK)
+			continue;
 
-	/* Check that we have debug power domains activated */
-	LOG_DEBUG("DAP: wait CDBGPWRUPACK");
-	retval = dap_dp_poll_register(dap, DP_CTRL_STAT,
-				      CDBGPWRUPACK, CDBGPWRUPACK,
-				      DAP_POWER_DOMAIN_TIMEOUT);
-	if (retval != ERROR_OK)
-		return retval;
+		/* Check that we have debug power domains activated */
+		LOG_DEBUG("DAP: wait CDBGPWRUPACK");
+		retval = dap_dp_poll_register(dap, DP_CTRL_STAT,
+					      CDBGPWRUPACK, CDBGPWRUPACK,
+					      DAP_POWER_DOMAIN_TIMEOUT);
+		if (retval != ERROR_OK)
+			continue;
 
-	LOG_DEBUG("DAP: wait CSYSPWRUPACK");
-	retval = dap_dp_poll_register(dap, DP_CTRL_STAT,
-				      CSYSPWRUPACK, CSYSPWRUPACK,
-				      DAP_POWER_DOMAIN_TIMEOUT);
-	if (retval != ERROR_OK)
-		return retval;
+		LOG_DEBUG("DAP: wait CSYSPWRUPACK");
+		retval = dap_dp_poll_register(dap, DP_CTRL_STAT,
+					      CSYSPWRUPACK, CSYSPWRUPACK,
+					      DAP_POWER_DOMAIN_TIMEOUT);
+		if (retval != ERROR_OK)
+			continue;
 
-	retval = dap_queue_dp_read(dap, DP_CTRL_STAT, NULL);
-	if (retval != ERROR_OK)
-		return retval;
-	/* With debug power on we can activate OVERRUN checking */
-	dap->dp_ctrl_stat = CDBGPWRUPREQ | CSYSPWRUPREQ | CORUNDETECT;
-	retval = dap_queue_dp_write(dap, DP_CTRL_STAT, dap->dp_ctrl_stat);
-	if (retval != ERROR_OK)
-		return retval;
-	retval = dap_queue_dp_read(dap, DP_CTRL_STAT, NULL);
-	if (retval != ERROR_OK)
-		return retval;
+		retval = dap_queue_dp_read(dap, DP_CTRL_STAT, NULL);
+		if (retval != ERROR_OK)
+			continue;
+		/* With debug power on we can activate OVERRUN checking */
+		dap->dp_ctrl_stat = CDBGPWRUPREQ | CSYSPWRUPREQ | CORUNDETECT;
+		retval = dap_queue_dp_write(dap, DP_CTRL_STAT, dap->dp_ctrl_stat);
+		if (retval != ERROR_OK)
+			continue;
+		retval = dap_queue_dp_read(dap, DP_CTRL_STAT, NULL);
+		if (retval != ERROR_OK)
+			continue;
 
-	/* check that we support packed transfers */
-	uint32_t csw, cfg;
+		retval = dap_setup_accessport(dap, CSW_8BIT | CSW_ADDRINC_PACKED, 0);
+		if (retval != ERROR_OK)
+			continue;
 
-	retval = dap_setup_accessport(dap, CSW_8BIT | CSW_ADDRINC_PACKED, 0);
-	if (retval != ERROR_OK)
-		return retval;
+		retval = dap_queue_ap_read(dap, AP_REG_CSW, &csw);
+		if (retval != ERROR_OK)
+			continue;
 
-	retval = dap_queue_ap_read(dap, AP_REG_CSW, &csw);
-	if (retval != ERROR_OK)
-		return retval;
+		retval = dap_queue_ap_read(dap, AP_REG_CFG, &cfg);
+		if (retval != ERROR_OK)
+			continue;
 
-	retval = dap_queue_ap_read(dap, AP_REG_CFG, &cfg);
-	if (retval != ERROR_OK)
-		return retval;
+		retval = dap_run(dap);
+		if (retval != ERROR_OK)
+			continue;
 
-	retval = dap_run(dap);
+		break;
+	}
+
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -986,7 +992,7 @@ static int dap_rom_display(struct command_context *cmd_ctx,
 			uint32_t c_cid0, c_cid1, c_cid2, c_cid3;
 			uint32_t c_pid0, c_pid1, c_pid2, c_pid3, c_pid4;
 			uint32_t component_base;
-			unsigned part_num;
+			uint32_t part_num;
 			const char *type, *full;
 
 			component_base = (dbgbase & 0xFFFFF000) + (romentry & 0xFFFFF000);
@@ -1234,6 +1240,18 @@ static int dap_rom_display(struct command_context *cmd_ctx,
 				type = "Cortex-M3 FBP";
 				full = "(Flash Patch and Breakpoint)";
 				break;
+			case 0x008:
+				type = "Cortex-M0 SCS";
+				full = "(System Control Space)";
+				break;
+			case 0x00a:
+				type = "Cortex-M0 DWT";
+				full = "(Data Watchpoint and Trace)";
+				break;
+			case 0x00b:
+				type = "Cortex-M0 BPU";
+				full = "(Breakpoint Unit)";
+				break;
 			case 0x00c:
 				type = "Cortex-M4 SCS";
 				full = "(System Control Space)";
@@ -1331,6 +1349,14 @@ static int dap_rom_display(struct command_context *cmd_ctx,
 				type = "Cortex-M4 TPUI";
 				full = "(Trace Port Interface Unit)";
 				break;
+			case 0x9a5:
+				type = "Cortex-A5 ETM";
+				full = "(Embedded Trace)";
+				break;
+			case 0xc05:
+				type = "Cortex-A5 Debug";
+				full = "(Debug Unit)";
+				break;
 			case 0xc08:
 				type = "Cortex-A8 Debug";
 				full = "(Debug Unit)";
@@ -1339,7 +1365,12 @@ static int dap_rom_display(struct command_context *cmd_ctx,
 				type = "Cortex-A9 Debug";
 				full = "(Debug Unit)";
 				break;
+			case 0x4af:
+				type = "Cortex-A15 Debug";
+				full = "(Debug Unit)";
+				break;
 			default:
+				LOG_DEBUG("Unrecognized Part number 0x%" PRIx32, part_num);
 				type = "-*- unrecognized -*-";
 				full = "";
 				break;
@@ -1408,9 +1439,9 @@ static int dap_info_command(struct command_context *cmd_ctx,
 		command_print(cmd_ctx, "No AP found at this ap 0x%x", ap);
 
 	romtable_present = ((mem_ap) && (dbgbase != 0xFFFFFFFF));
-	if (romtable_present) {
+	if (romtable_present)
 		dap_rom_display(cmd_ctx, dap, ap, dbgbase, 0);
-	} else
+	else
 		command_print(cmd_ctx, "\tNo ROM table present");
 	dap_ap_select(dap, ap_old);
 

@@ -507,16 +507,16 @@ static int get_stellaris_info(struct flash_bank *bank, char *buf, int buf_size)
 	printed = snprintf(buf,
 			   buf_size,
 			   "did1: 0x%8.8" PRIx32 ", arch: 0x%4.4" PRIx32
-			   ", eproc: %s, ramsize: %ik, flashsize: %ik\n",
+			   ", eproc: %s, ramsize: %" PRIu32 "k, flashsize: %" PRIu32 "k\n",
 			   stellaris_info->did1,
 			   stellaris_info->did1,
 			   "ARMv7M",
 			   stellaris_info->sramsiz,
-			   stellaris_info->num_pages * stellaris_info->pagesize / 1024);
+			   (uint32_t)(stellaris_info->num_pages * stellaris_info->pagesize / 1024));
 	buf += printed;
 	buf_size -= printed;
 
-	printed = snprintf(buf,
+	snprintf(buf,
 			   buf_size,
 			   "master clock: %ikHz%s, "
 			   "rcc is 0x%" PRIx32 ", rcc2 is 0x%" PRIx32 ", "
@@ -1359,12 +1359,12 @@ COMMAND_HANDLER(stellaris_handle_recover_command)
 	struct flash_bank *bank;
 	int retval;
 
-	if (CMD_ARGC < 1)
+	if (CMD_ARGC != 0)
 		return ERROR_COMMAND_SYNTAX_ERROR;
 
-	retval = CALL_COMMAND_HANDLER(flash_command_get_bank, 0, &bank);
-	if (retval != ERROR_OK)
-		return retval;
+	bank = get_flash_bank_by_num_noprobe(0);
+	if (!bank)
+		return ERROR_FAIL;
 
 	/* REVISIT ... it may be worth sanity checking that the AP is
 	 * inactive before we start.  ARM documents that switching a DP's
@@ -1425,7 +1425,7 @@ static const struct command_registration stellaris_exec_command_handlers[] = {
 		.name = "recover",
 		.handler = stellaris_handle_recover_command,
 		.mode = COMMAND_EXEC,
-		.usage = "bank_id",
+		.usage = "",
 		.help = "recover (and erase) locked device",
 	},
 	COMMAND_REGISTRATION_DONE

@@ -1621,7 +1621,7 @@ static int xscale_read_core_reg(struct target *target, struct reg *r,
 }
 
 static int xscale_write_core_reg(struct target *target, struct reg *r,
-	int num, enum arm_mode mode, uint32_t value)
+	int num, enum arm_mode mode, uint8_t *value)
 {
 	/** \todo add debug handler support for core register writes */
 	LOG_ERROR("not implemented");
@@ -3245,8 +3245,8 @@ COMMAND_HANDLER(xscale_handle_vector_catch_command)
 				return ERROR_COMMAND_SYNTAX_ERROR;
 			}
 		}
-		*(uint32_t *)(dcsr_reg->value) &= ~DCSR_TRAP_MASK;
-		*(uint32_t *)(dcsr_reg->value) |= catch;
+		buf_set_u32(dcsr_reg->value, 0, 32,
+				(buf_get_u32(dcsr_reg->value, 0, 32) & ~DCSR_TRAP_MASK) | catch);
 		xscale_write_dcsr(target, -1, -1);
 	}
 

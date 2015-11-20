@@ -91,7 +91,7 @@ struct ChibiOS_params {
 	const struct rtos_register_stacking *stacking_info;
 };
 
-static const struct ChibiOS_params ChibiOS_params_list[] = {
+static struct ChibiOS_params ChibiOS_params_list[] = {
 	{
 	"cortex_m",							/* target_name */
 	0,
@@ -507,7 +507,12 @@ static int ChibiOS_get_thread_reg_list(struct rtos *rtos, int64_t thread_id, cha
 
 static int ChibiOS_get_symbol_list_to_lookup(symbol_table_elem_t *symbol_list[])
 {
-	*symbol_list = ChibiOS_symbol_list;
+	*symbol_list = malloc(sizeof(ChibiOS_symbol_list));
+
+	if (*symbol_list == NULL)
+		return ERROR_FAIL;
+
+	memcpy(*symbol_list, ChibiOS_symbol_list, sizeof(ChibiOS_symbol_list));
 	return 0;
 }
 
